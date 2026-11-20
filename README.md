@@ -1,78 +1,76 @@
-<div align="center">
-    <h1>WebView TV</h1>
-<div align="center">
+# 央视频TV (Yangshipin TV)
 
-**English** | [简体中文](README_CN.md) | [繁體中文](README_TW.md)
+基于 [WebViewTvLive](https://github.com/hxh19950701/WebViewTvLive) 魔改的**单源极简电视直播 App**：只使用央视频官方网页 `https://www.yangshipin.cn/tv/home`，一个标签页看遍央视与全国卫视。
 
-![GitHub Repo stars](https://img.shields.io/github/stars/hxh19950701/WebViewTvLive)
-![GitHub top language](https://img.shields.io/github/languages/top/hxh19950701/WebViewTvLive)
-![GitHub repo size](https://img.shields.io/github/repo-size/hxh19950701/WebViewTvLive)
-![GitHub Release](https://img.shields.io/github/v/release/hxh19950701/WebViewTvLive)
+> Fork 自 [hxh19950701/WebViewTvLive](https://github.com/hxh19950701/WebViewTvLive)，保留其腾讯 X5 WebView 电视浏览器环境，感谢原作者开源。
 
-</div>
-    <p>A TV Live Streaming App developed using Tencent X5 WebView</p>
-</div>
-    <p>Open official web pages with one click, providing a convenient and quick way to watch official TV live broadcasts.</p>
+## 理念：映射点击
 
-## Features
-- Automatic channel list updates
-- Multiple live streaming sources
-- Customizable application settings
-- Channel switching via number keys
-- Gesture controls for screen brightness and volume
-- Optimized for phones, tablets, TVs, and car head units
+本应用不解析任何视频流，也不内置任何播放地址。它只做一件事：
 
-## Roadmap
-- Automatic source switching/refreshing on playback errors
-- Support for custom playlist sources
-- LAN remote configuration
-- Support for playback/catch-up features
+```
+你的选择(弹窗/遥控)  →  虚拟鼠标注入脚本  →  点击央视频页面上的对应按钮
+         换台                  一次 JS click            频道按钮
+         清晰度               一次 JS click            清晰度菜单项
+         全屏                 一次 JS click            整体全屏按钮
+```
 
-## Usage
-- [View User Guide](UserGuide.md)
+页面加载、切台缓冲全部使用央视频原生的"切换努力加载中"界面，体验与网页版完全一致，稳定性等同于官网本身。
 
-## Get the App
-- GitHub <br>
-https://github.com/hxh19950701/WebViewTvLive/releases <br>
+## 功能
 
-## Advantages
-- Directly uses official live streaming links, ensuring stability and reliability
-- Compatible with m3u8 links
+- **单页播放**：全程只开一个标签页，换台不重新加载网页
+- **免费频道全覆盖**：央视 27 个免费频道 + 24 个卫视（页面上标注限免/VIP 的付费频道已剔除）
+- **换台弹窗**：全部 / 央视 / 卫视三个分类，带彩色台标徽章
+- **清晰度选择**：蓝光 1080P / 超清 720P / 高清 540P，默认蓝光
+- **启动即全屏**：打开自动进入整体全屏，只保留画面，隐藏一切网页按钮
+- **记忆播放**：每次打开自动回到上次退出的频道与清晰度
+- **防误触遮罩**：手机/平板上触摸不透传网页，动屏幕只唤起换台弹窗
+- **多端适配**：手机、平板（触摸）、电视/盒子（遥控器）一套代码全适配
 
-## Disadvantages
-- Built on WebView, which requires certain device performance; see [Device Requirements](#device-requirements) for details
-- Slightly longer channel loading times
-- Video quality selection is unavailable, and frame rates are limited (mostly 24FPS)
-- Due to copyright restrictions, official sites may not broadcast during certain time slots
+## 操作方式
 
-## Device Requirements
-| Item            | Minimum Configuration              | Recommended Configuration                                   |
-|-----------------|------------------------------------|-------------------------------------------------------------|
-| CPU             | Quad-core ARM Cortex-A53 (≥1.2GHz) | Quad-core or above ARM Cortex-A55 / A76 hybrid architecture |
-| RAM             | 2GB                                | 4GB and above                                               |
-| OS Version      | Android 5.0                        | Android 11 and above                                        |
-| WebView Version | WebView 78                         | WebView 120 and above                                       |
+| 操作 | 手机/平板 | 电视/盒子 |
+|---|---|---|
+| 唤起换台弹窗 | 单击屏幕任意处 | 遥控器 OK / 确认键 |
+| 选台 | 触摸点击频道 | 十字键导航 + OK 确认 |
+| 顺序换台 | — | 上/下键直接换台 |
+| 清晰度 | 弹窗右上角"清晰度"入口 | 遥控器 MENU 键直接调出 |
+| 退出 | 返回键按两次 | 返回键按两次 |
 
-- Using devices below the recommended configuration may affect user experience, causing issues like lag, slow channel switching, or crashes after prolonged use.<br/>
-  
-## FAQ
-- Doubao AI has indexed most of the project's information; you can [click here to ask](https://www.doubao.com/chat/)<br/>
-- [View FAQ](FAQ.md)
-- [Usage by Parents](UseByParents.md)
+## 获取 APK
 
-## Important Notes
-- Due to the challenging open-source environment in mainland China, this project has paused open sourcing. The final open-source version is 1.6. The source code is provided for learning and communication purposes only.<br/>
-- For repackaged applications, usage is limited to personal use or moderate sharing with the original app name credited.<br/>
-- Do not use this project for profit.<br/>
+本仓库已配置 GitHub Actions 自动构建：
 
-## Disclaimer
-- This application only embeds and displays public live streaming pages from TV stations. All content is sourced from the original websites, and copyrights belong to the respective owners.
-- This application does not provide any video resources, nor does it store or forward them. It is intended solely for study and research purposes.
-- This application will not crack or bypass any restrictions imposed by the source websites. If the original content changes or access is restricted, this application will not perform any fixes or cracks.
-- The official live streaming addresses included in this application are collected and submitted by netizens. If your copyright has been inadvertently infringed, please contact the developer for removal.<br/>
+1. 点击仓库的 **Actions** 标签页
+2. 选择最近一次成功的 **Build APK** 运行
+3. 在底部 Artifacts 下载 `YangshipinTV-release`（debug 为调试版）
 
-## Donation
-If this project has been helpful to you, donations to support the developer are welcome.<br/>
-Note: Donations are solely for supporting development and maintenance and are not related to any specific content or programs.<br/>
-<br/>
-<img src="./images/image_5.png"/>
+也可自行构建：JDK 17 + Android SDK，`./gradlew assembleRelease`。
+
+## 设备要求
+
+沿用原项目要求：Android 5.0+，推荐 Android 11+；WebView 需支持现代网页（X5 内核运行时自动下载）。
+
+## 与原项目的差异
+
+| | 原 WebViewTvLive | 本 Fork |
+|---|---|---|
+| 播放源 | 多源、播放列表可更新 | 仅央视频 tv/home |
+| 换台 | 重新加载整个网页 | 页内映射点击，一个标签页 |
+| 清晰度 | 不可选 | 蓝光/超清/高清可选 |
+| 加载提示 | App 自绘黑屏进度 | 央视频原生"努力加载中" |
+| 付费频道 | 未过滤 | 已剔除（限免/VIP） |
+| 源码规模 | 41 个 Kotlin 文件 | 11 个 Kotlin 文件 |
+
+## 声明
+
+- 本应用仅嵌套展示央视频官方公开直播页面，所有内容来自原网站，版权归中央广播电视总台所有
+- 本应用不提供任何视频资源，不储存、不转发，仅供学习研究
+- 不破解、不绕过源站任何限制；源站改版或限制访问导致的失效不做破解修复
+
+## License
+
+原项目未附带开源许可证（默认保留所有权利）。本 Fork 仅供个人学习使用，请勿用于商业用途。
+
+> AI生成

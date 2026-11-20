@@ -15,19 +15,4 @@
 		android:layout_height="match_parent"
 		android:layout_gravity="center" />
 
-	<com.vasthread.webviewtv.widget.WaitingView
-		android:id="@+id/waitingView"
-		android:layout_width="100dp"
-		android:layout_height="100dp"
-		android:layout_gravity="center"
-		android:visibility="gone" />
-
-	<com.vasthread.webviewtv.widget.ChannelBarView
-		android:id="@+id/channelBarView"
-		android:layout_width="500dp"
-		android:layout_height="wrap_content"
-		android:layout_gravity="bottom|center"
-		android:layout_marginBottom="30dp"
-		android:visibility="gone" />
-
 </merge>

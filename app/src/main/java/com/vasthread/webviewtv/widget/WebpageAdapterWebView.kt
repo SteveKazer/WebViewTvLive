@@ -29,17 +29,22 @@ import com.tencent.smtt.sdk.WebChromeClient
 import com.tencent.smtt.sdk.WebSettings
 import com.tencent.smtt.sdk.WebView
 import com.tencent.smtt.sdk.WebViewClient
-import com.vasthread.webviewtv.adapter.WebpageAdapterManager
 import com.vasthread.webviewtv.misc.isMainThread
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.apache.commons.lang3.math.Fraction
+import java.io.BufferedReader
 import kotlin.system.measureTimeMillis
 
 typealias LP = FrameLayout.LayoutParams
 
+/**
+ * 央视频专用 WebView。
+ * 保留原项目的腾讯 X5 电视浏览器环境与全屏视频(onShowCustomView)机制;
+ * 全部页面适配逻辑(注入脚本/F键兜底)收敛在本类, 不再有适配器体系。
+ */
 @Suppress("unused", "DEPRECATION")
 @SuppressLint("SetJavaScriptEnabled")
 class WebpageAdapterWebView @JvmOverloads constructor(
@@ -49,48 +54,44 @@ class WebpageAdapterWebView @JvmOverloads constructor(
     companion object {
         private const val TAG = "WebpageAdapterWebView"
         const val URL_BLANK = "about:blank"
-        private const val SHOW_WAITING_VIEW_DELAY = 3000L
-        private const val MAX_ZOOM_OUT_LEVEL = 3
+
+        /** 唯一播放页: 全程只用一个标签页 */
+        const val URL_HOME = "https://www.yangshipin.cn/tv/home"
+
+        private const val PC_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
         private const val CHECK_PAGE_LOADING_INTERVAL = 50L
         private const val BLANK_PAGE_WAIT = 800L
+        private const val KEY_CLICK_DURATION = 50L
+        private const val FS_KEY_MIN_INTERVAL = 2500L
+
         val RATIO_16_9 = Fraction.getFraction(16, 9)!!
         val RATIO_4_3 = Fraction.getFraction(4, 3)!!
+    }
+
+    private val injectedJs: String by lazy {
+        context.assets.open("yangshipin.js").bufferedReader().use(BufferedReader::readText)
     }
 
     private var requestedUrl = ""
     private val videoSize = Point()
     private var isInFullscreen = false
+    private var injectedUrl = ""
+    private var lastFullscreenKeyAt = 0L
     private val loadingInfo = PageLoadingInfo("", false)
-    private val showWaitingViewAction = Runnable { onWaitingStateChanged?.invoke(true) }
-    private val dismissWaitingViewAction = Runnable { onWaitingStateChanged?.invoke(false) }
 
     lateinit var fullscreenContainer: FrameLayout
-    var onWaitingStateChanged: ((Boolean) -> Unit)? = null
-    var onPageFinished: ((String) -> Unit)? = null
-    var onProgressChanged: ((Int) -> Unit)? = null
-    var onFullscreenStateChanged: ((Boolean) -> Unit)? = null
-    var onVideoRatioChanged: ((Fraction) -> Unit)? = null
+
+    /** 页面加载并注入脚本完成, 可执行 restore 等后续指令 */
+    var onPageReady: (() -> Unit)? = null
+
+    fun interface JsCallback { fun onResult(result: String) }
 
     private val client = object : WebViewClient() {
 
         override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
-            //view.loadUrl(url)
+            // 只允许停留在央视频页面内(SPA 内部路由不受影响)
             return true
-        }
-
-        override fun shouldOverrideKeyEvent(view: WebView, event: KeyEvent): Boolean {
-            //Log.i(TAG, "shouldOverrideKeyEvent $event")
-            return super.shouldOverrideKeyEvent(view, event)
-        }
-
-        override fun onUnhandledKeyEvent(view: WebView, event: KeyEvent) {
-            //Log.i(TAG, "onUnhandledKeyEvent $event")
-            super.onUnhandledKeyEvent(view, event)
-        }
-
-        override fun onLoadResource(view: WebView, url: String) {
-            //Log.i(TAG, "onLoadResource, $url")
-            super.onLoadResource(view, url)
         }
 
         override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
@@ -101,7 +102,6 @@ class WebpageAdapterWebView @JvmOverloads constructor(
             super.onPageStarted(view, url, favicon)
             Log.i(TAG, "onPageStarted, $url")
             loadingInfo.set(url, true)
-            disablePlayCheck()
         }
 
         override fun onPageFinished(view: WebView, url: String) {
@@ -114,32 +114,15 @@ class WebpageAdapterWebView @JvmOverloads constructor(
             super.onReceivedHttpError(view, request, response)
             Log.i(TAG, "Http error: ${response.statusCode} ${request.url}")
         }
-
     }
 
-    private val clientExtension = object : ProxyWebViewClientExtension() {
-
-    }
+    private val clientExtension = object : ProxyWebViewClientExtension() {}
 
     private val chromeClient = object : WebChromeClient() {
 
         private var view: View? = null
         private var callback: IX5WebChromeClient.CustomViewCallback? = null
-        private var lastUrl = ""
-        private var lastProgress = 0
         var videoRatio = RATIO_16_9
-            set(value) {
-                if (field == value) return
-                field = value
-                onVideoRatioChanged?.invoke(value)
-                if (isInFullscreen) {
-                    view?.layoutParams = generateLayoutParams()
-                }
-            }
-
-        fun markNewPage() {
-            lastUrl = ""
-        }
 
         override fun onJsAlert(view: WebView, url: String, message: String?, result: JsResult): Boolean {
             result.cancel()
@@ -149,20 +132,10 @@ class WebpageAdapterWebView @JvmOverloads constructor(
         override fun onProgressChanged(view: WebView, progress: Int) {
             super.onProgressChanged(view, progress)
             Log.i(TAG, "$url, progress=$progress")
-            if (url == URL_BLANK) {
-                disablePlayCheck()
-                return
-            }
-            if (view.url != lastUrl || progress > lastProgress) {
-                onProgressChanged?.invoke(progress)
-                disablePlayCheck()
-                adjustWideViewPort()
-                if (progress == 100) {
-                    evaluateJavascript(WebpageAdapterManager.get(url).javascript(), null)
-                    onPageFinished?.invoke(url)
-                }
-                lastUrl = view.url
-                lastProgress = progress
+            if (url == URL_BLANK) return
+            if (progress == 100) {
+                injectScriptOnce()
+                onPageReady?.invoke()
             }
         }
 
@@ -176,7 +149,6 @@ class WebpageAdapterWebView @JvmOverloads constructor(
             return true
         }
 
-        @Suppress("RemoveRedundantQualifierName")
         fun generateLayoutParams(): FrameLayout.LayoutParams {
             val screenRadio = Fraction.getFraction(fullscreenContainer.width, fullscreenContainer.height)
             val compare = screenRadio.compareTo(videoRatio)
@@ -191,7 +163,6 @@ class WebpageAdapterWebView @JvmOverloads constructor(
             this.callback = callback
             fullscreenContainer.addView(view, generateLayoutParams())
             isInFullscreen = true
-            onFullscreenStateChanged?.invoke(true)
         }
 
         override fun onHideCustomView() {
@@ -201,7 +172,6 @@ class WebpageAdapterWebView @JvmOverloads constructor(
             view = null
             callback = null
             isInFullscreen = false
-            onFullscreenStateChanged?.invoke(false)
         }
 
         override fun onPermissionRequest(request: PermissionRequest) {
@@ -210,17 +180,7 @@ class WebpageAdapterWebView @JvmOverloads constructor(
     }
 
     private val chromeClientExtension = object : ProxyWebChromeClientExtension() {
-
-        override fun jsRequestFullScreen() {
-            Log.i(TAG, "jsRequestFullScreen")
-        }
-
-        override fun h5videoRequestFullScreen(s: String) {
-            Log.i(TAG, "h5videoRequestFullScreen")
-        }
-
         override fun onPermissionRequest(origin: String, resources: Long, callback: MediaAccessPermissionsCallback): Boolean {
-            Log.i(TAG, "onPermissionRequest, origin=$origin, resources=$resources")
             callback.invoke(origin, 0, true)
             return true
         }
@@ -235,6 +195,9 @@ class WebpageAdapterWebView @JvmOverloads constructor(
             loadWithOverviewMode = true
             setAppCacheEnabled(true)
             cacheMode = WebSettings.LOAD_DEFAULT
+            userAgentString = PC_USER_AGENT
+            loadsImagesAutomatically = false
+            blockNetworkImage = true
         }
         apply {
             webViewClient = client
@@ -246,28 +209,31 @@ class WebpageAdapterWebView @JvmOverloads constructor(
         }
     }
 
+    private fun injectScriptOnce() {
+        val current = url
+        if (current == null || current == URL_BLANK || current == injectedUrl) return
+        injectedUrl = current
+        Log.i(TAG, "Inject yangshipin.js into $current")
+        evaluateJavascript(injectedJs, null)
+    }
+
     @JavascriptInterface
-    override fun loadUrl(url: String) {
+    fun loadUrl(url: String) {
         requestedUrl = url
         CoroutineScope(Dispatchers.Main).launch {
             resetPage(url)
             setVideoSize(0, 0)
             if (requestedUrl == url) {
                 settings.apply {
-                    loadsImagesAutomatically = false
-                    blockNetworkImage = true
-                    userAgentString = WebpageAdapterManager.get(url).userAgent()
+                    userAgentString = PC_USER_AGENT
                 }
-                chromeClient.apply {
-                    videoRatio = RATIO_16_9
-                }
+                chromeClient.videoRatio = RATIO_16_9
                 settingsExtension?.apply {
                     setPicModel(IX5WebSettingsExtension.PicModel_NoPic)
                 }
-                disablePlayCheck()
-                chromeClient.markNewPage()
+                injectedUrl = ""
                 Log.i(TAG, "Load url $url")
-                super.loadUrl(url)
+                super@WebpageAdapterWebView.loadUrl(url)
             } else {
                 Log.i(TAG, "New url requested, ignore.")
             }
@@ -277,21 +243,15 @@ class WebpageAdapterWebView @JvmOverloads constructor(
     private suspend fun resetPage(destUrl: String) {
         Log.i(TAG, "Resetting page...")
         val cost = measureTimeMillis {
-            super.loadUrl(URL_BLANK)
+            super@WebpageAdapterWebView.loadUrl(URL_BLANK)
             while (loadingInfo.url != URL_BLANK && !loadingInfo.isPageLoading) {
-                if (destUrl != requestedUrl) {
-                    Log.i(TAG, "Requested url changed, cancel.")
-                    break
-                }
+                if (destUrl != requestedUrl) break
                 delay(CHECK_PAGE_LOADING_INTERVAL)
             }
             if (destUrl == requestedUrl) {
                 val endTime = SystemClock.uptimeMillis() + BLANK_PAGE_WAIT
                 while (SystemClock.uptimeMillis() < endTime) {
-                    if (destUrl != requestedUrl) {
-                        Log.i(TAG, "Requested url changed, cancel.")
-                        break
-                    }
+                    if (destUrl != requestedUrl) break
                     delay(CHECK_PAGE_LOADING_INTERVAL)
                 }
             }
@@ -299,49 +259,49 @@ class WebpageAdapterWebView @JvmOverloads constructor(
         Log.i(TAG, "Done Resetting, cost ${cost}ms.")
     }
 
-    override fun reload() {
-        chromeClient.markNewPage()
-        super.reload()
-    }
-
-    override fun stopLoading() {
-        super.stopLoading()
-        disablePlayCheck()
-    }
+    // ---------------- 提供给上层/Kotlin调用的能力 ----------------
 
     fun isInFullscreen() = isInFullscreen
 
-    fun setVideoRatio(ratio: Fraction) {
-        chromeClient.videoRatio = ratio
+    fun evaluate(js: String, callback: JsCallback? = null) {
+        post { evaluateJavascript(js) { value -> callback?.onResult(value) } }
     }
 
-    fun getVideoRatio() = chromeClient.videoRatio
+    /** 换台: 隐藏鼠标点击页面频道按钮 */
+    fun switchChannel(name: String) {
+        evaluate("window.__WVT__ && __WVT__.switchChannel('${name.escapeJs()}')")
+    }
 
+    /** 设置清晰度: 点击页面隐藏的清晰度菜单项 */
+    fun setQuality(qualityLabel: String) {
+        evaluate("window.__WVT__ && __WVT__.setQuality('${qualityLabel.escapeJs()}')")
+    }
+
+    /** 启动恢复: 切换到上次频道+上次清晰度 */
+    fun restore(channel: String, quality: String) {
+        evaluate("window.__WVT__ && __WVT__.restore('${channel.escapeJs()}','${quality.escapeJs()}')")
+    }
+
+    fun queryState(callback: JsCallback) {
+        evaluate("window.__WVT__ ? __WVT__.getState() : '{}'", callback)
+    }
+
+    fun pauseVideo() = evaluate("window.__WVT__ && __WVT__.pause()")
+
+    fun playVideo() = evaluate("window.__WVT__ && __WVT__.play()")
+
+    // ---------------- JS -> 原生 ----------------
+
+    /** 页面请求原生注入一次 F 键(全屏兜底, video.js 快捷键) */
     @JavascriptInterface
-    fun schemeEnterFullscreen() {
+    fun requestKeyFullscreen() {
         if (isInFullscreen()) return
-        Log.i(TAG, "schemeEnterFullscreen")
-        CoroutineScope(Dispatchers.Main).launch {
-            WebpageAdapterManager.get(url).tryEnterFullscreen(this@WebpageAdapterWebView)
-        }
+        CoroutineScope(Dispatchers.Main).launch { pressFullscreenKey() }
     }
 
+    /** 视频在播状态上报 */
     @JavascriptInterface
-    fun notifyVideoPlaying() {
-        disablePlayCheck()
-        enablePlayCheck()
-    }
-
-    @JavascriptInterface
-    fun enablePlayCheck() {
-        postDelayed(showWaitingViewAction, SHOW_WAITING_VIEW_DELAY)
-    }
-
-    @JavascriptInterface
-    fun disablePlayCheck() {
-        removeCallbacks(showWaitingViewAction)
-        post(dismissWaitingViewAction)
-    }
+    fun notifyVideoPlaying() {}
 
     @JavascriptInterface
     fun setVideoSize(width: Int, height: Int) {
@@ -350,13 +310,20 @@ class WebpageAdapterWebView @JvmOverloads constructor(
 
     fun getVideoSize() = videoSize
 
-    private fun adjustWideViewPort() {
-        var level = 0
-        while (canZoomOut() && level < 3) {
-            zoomOut()
-            ++level
-        }
+    private suspend fun pressFullscreenKey() {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastFullscreenKeyAt < FS_KEY_MIN_INTERVAL) return
+        lastFullscreenKeyAt = now
+        requestFocus()
+        val downTime = SystemClock.uptimeMillis()
+        dispatchKeyEvent(KeyEvent(downTime, downTime, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_F, 0))
+        delay(KEY_CLICK_DURATION)
+        if (isInFullscreen()) return
+        dispatchKeyEvent(KeyEvent(downTime, SystemClock.uptimeMillis(), KeyEvent.ACTION_UP, KeyEvent.KEYCODE_F, 0))
+        Log.i(TAG, "Fullscreen key pressed.")
     }
+
+    private fun String.escapeJs() = replace("\\", "\\\\").replace("'", "\\'")
 
     private class PageLoadingInfo(var url: String, var isPageLoading: Boolean) {
         fun set(url: String, isPageLoading: Boolean) {

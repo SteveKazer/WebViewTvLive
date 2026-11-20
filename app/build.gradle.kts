@@ -8,22 +8,18 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.vasthread.webviewtv"
+        applicationId = "com.stevekazer.yangshiplive"
         minSdk = 21
         targetSdk = 34
-        versionCode = 6
-        versionName = "1.6"
-
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        ndk {
-            abiFilters += listOf("x86_64")
-        }
+        versionCode = 20
+        versionName = "2.0.0-yangshipin"
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            // 复用自动生成的 debug 签名, 保证 CI 产出的 APK 可直接安装
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
@@ -34,18 +30,13 @@ android {
     kotlinOptions {
         jvmTarget = "1.8"
     }
-
 }
 
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
-    implementation("androidx.preference:preference-ktx:1.2.1")
     implementation("com.tencent.tbs:tbssdk:44286")
-    implementation("com.tencent.bugly:crashreport:latest.release")
     implementation("com.github.JessYanCoding:AndroidAutoSize:v1.2.1")
-    implementation("com.google.code.gson:gson:2.11.0")
-    implementation("com.squareup.okhttp3:okhttp:4.9.1")
     implementation("org.apache.commons:commons-lang3:3.0")
 }

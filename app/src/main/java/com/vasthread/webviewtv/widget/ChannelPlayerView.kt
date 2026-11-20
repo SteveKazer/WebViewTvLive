@@ -1,5 +1,6 @@
 package com.vasthread.webviewtv.widget
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Rect
@@ -11,37 +12,28 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.widget.FrameLayout
 import com.vasthread.webviewtv.R
-import com.vasthread.webviewtv.playlist.Channel
-import com.vasthread.webviewtv.settings.SettingsManager
 
+/**
+ * 播放器视图: 遮罩防误触 + 映射点击。
+ *
+ * - 触摸设备: 屏幕触摸一律不透传给网页(防误触遮罩), 单击只回调唤起换台弹窗。
+ * - 电视: 按键不透传给网页, 全部交由 MainActivity 处理遥控导航。
+ * - 换台/清晰度: 通过注入脚本以"隐藏鼠标"点击页面按钮, 永远停留在一个标签页。
+ */
 class ChannelPlayerView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
 ) : FrameLayout(context, attrs, defStyleAttr) {
 
-    companion object {
-        private const val TAG = "ChannelPlayer"
-    }
+    val webView: WebpageAdapterWebView
+    private val fullscreenContainer: FrameLayout
 
-    private val webView: WebpageAdapterWebView
-    private val waitingView: WaitingView
-    private val channelBarView: ChannelBarView
+    /** 单击屏幕回调 */
+    var clickCallback: (() -> Unit)? = null
 
-    var channel: Channel? = null
-        set(value) {
-            if (field == value) return
-            field = value
-            if (value == null) {
-                webView.loadUrl(WebpageAdapterWebView.URL_BLANK)
-                channelBarView.dismiss()
-            } else {
-                webView.loadUrl(value.url)
-                channelBarView.setCurrentChannelAndShow(value)
-            }
-        }
-    var clickCallback: ((Float, Float) -> Unit)? = null
-    var dismissAllViewCallback: (() -> Unit)? = null
-    var onChannelReload: ((Channel) -> Unit)? = null
-    var onVideoRatioChanged: ((Boolean) -> Unit)? = null
+    /** 页面就绪回调(脚本已注入, 可执行恢复动作) */
+    var onPageReady: (() -> Unit)? = null
+
+    private var started = false
 
     private val gestureDetector = GestureDetector(context, object : GestureDetector.OnGestureListener {
 
@@ -49,8 +41,9 @@ class ChannelPlayerView @JvmOverloads constructor(
 
         override fun onShowPress(e: MotionEvent) = Unit
 
+        @SuppressLint("ClickableViewAccessibility")
         override fun onSingleTapUp(e: MotionEvent): Boolean {
-            clickCallback?.invoke(e.x, e.y)
+            clickCallback?.invoke()
             return true
         }
 
@@ -59,7 +52,6 @@ class ChannelPlayerView @JvmOverloads constructor(
         override fun onLongPress(e: MotionEvent) = Unit
 
         override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float) = false
-
     })
 
     init {
@@ -69,47 +61,48 @@ class ChannelPlayerView @JvmOverloads constructor(
         LayoutInflater.from(context).inflate(R.layout.widget_channel_player, this)
         setBackgroundColor(Color.BLACK)
         webView = findViewById(R.id.webView)
-        channelBarView = findViewById(R.id.channelBarView)
-        waitingView = findViewById(R.id.waitingView)
-        waitingView.playerView = this
+        fullscreenContainer = findViewById(R.id.fullscreenContainer)
         webView.apply {
-            fullscreenContainer = this@ChannelPlayerView.findViewById(R.id.fullscreenContainer)
-            onPageFinished = {}
-            onProgressChanged = { channelBarView.setProgress(it) }
-            onFullscreenStateChanged = {}
-            onWaitingStateChanged = { waitingView.visibility = if (it) VISIBLE else GONE }
-            onVideoRatioChanged = { this@ChannelPlayerView.onVideoRatioChanged?.invoke(it == WebpageAdapterWebView.RATIO_16_9) }
+            this.fullscreenContainer = this@ChannelPlayerView.fullscreenContainer
+            onPageReady = { this@ChannelPlayerView.onPageReady?.invoke() }
         }
     }
+
+    /** 打开软件: 加载央视频页面(整个生命周期只加载一次) */
+    fun start() {
+        if (started) return
+        started = true
+        webView.loadUrl(WebpageAdapterWebView.URL_HOME)
+    }
+
+    /** 映射换台: 隐藏鼠标点击页面频道按钮 */
+    fun switchChannel(name: String) = webView.switchChannel(name)
+
+    /** 映射设置清晰度 */
+    fun setQuality(qualityLabel: String) = webView.setQuality(qualityLabel)
+
+    /** 启动恢复上次频道/清晰度 */
+    fun restore(channel: String, quality: String) = webView.restore(channel, quality)
+
+    fun pauseVideo() = webView.pauseVideo()
+
+    fun playVideo() = webView.playVideo()
 
     override fun requestFocus(direction: Int, previouslyFocusedRect: Rect?): Boolean {
         return webView.requestFocus(direction, previouslyFocusedRect)
     }
 
+    /** 遮罩: 触摸一律不透传 */
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        return if (SettingsManager.isWebViewTouchable()) {
-            dismissAllViewCallback?.invoke()
-            super.dispatchTouchEvent(event)
-        } else {
-            gestureDetector.onTouchEvent(event)
-        }
+        return gestureDetector.onTouchEvent(event)
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
         return false
     }
 
+    /** 遮罩: 按键一律不透传, 由 MainActivity 统一处理 */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         return false
     }
-
-    fun refreshChannel() {
-        webView.loadUrl(channel!!.url)
-    }
-
-    fun setVideoRatio(is_16_9: Boolean) {
-        webView.setVideoRatio(if (is_16_9) WebpageAdapterWebView.RATIO_16_9 else WebpageAdapterWebView.RATIO_4_3)
-    }
-
-    fun getVideoSize() = webView.getVideoSize()
 }
