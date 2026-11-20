@@ -267,28 +267,6 @@ class WebpageAdapterWebView @JvmOverloads constructor(
         post { evaluateJavascript(js) { value -> callback?.onResult(value) } }
     }
 
-    /** 同步执行 JS 并取回字符串结果(空串表示失败) */
-    private suspend fun awaitJs(js: String): String = suspendCancellableCoroutine { cont ->
-        val done = AtomicBoolean(false)
-        post {
-            try {
-                evaluateJavascript(js) { value ->
-                    if (done.compareAndSet(false, true)) {
-                        var v = value ?: ""
-                        // evaluateJavascript 返回 JSON 编码字符串, 去掉包裹引号
-                        if (v.length >= 2 && v.startsWith("\"") && v.endsWith("\"")) {
-                            v = v.substring(1, v.length - 1)
-                        }
-                        if (v == "null") v = ""
-                        cont.resume(v)
-                    }
-                }
-            } catch (e: Throwable) {
-                if (done.compareAndSet(false, true)) cont.resume("")
-            }
-        }
-    }
-
     /** 换台: 隐藏鼠标点击页面频道按钮 */
     fun switchChannel(name: String) {
         evaluate("window.__WVT__ && __WVT__.switchChannel('${name.escapeJs()}')")
