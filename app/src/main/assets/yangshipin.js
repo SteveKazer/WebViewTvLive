@@ -154,8 +154,9 @@
 		setTimeout(watchImmersive, 2000);
 	}
 
-	// 2. 向原生上报播放状态
+	// 2. 向原生上报播放状态; 首帧就绪后通知揭幕
 	var lastNotify = 0;
+	var firstFrameSent = false;
 	function watchVideo() {
 		try {
 			var v = q('video');
@@ -165,9 +166,14 @@
 					lastNotify = now;
 					callNative('notifyVideoPlaying');
 				}
+				if (!firstFrameSent && window.__WVT__.isImmersive()) {
+					firstFrameSent = true;
+					callNative('notifyFirstFrame');
+					log('first frame ready');
+				}
 			}
 		} catch (e) { /* ignore */ }
-		setTimeout(watchVideo, 1500);
+		setTimeout(watchVideo, 800);
 	}
 
 	log('injected, yangshipin immersive edition v2.1');

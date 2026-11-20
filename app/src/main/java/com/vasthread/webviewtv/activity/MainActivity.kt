@@ -16,6 +16,7 @@ import com.vasthread.webviewtv.R
 import com.vasthread.webviewtv.misc.preference
 import com.vasthread.webviewtv.playlist.Channels
 import com.vasthread.webviewtv.playlist.Channels.Channel
+import com.vasthread.webviewtv.update.UpdateManager
 import com.vasthread.webviewtv.widget.ChannelPlayerView
 import com.vasthread.webviewtv.widget.ChannelSheetView
 import com.vasthread.webviewtv.widget.QualitySheetView
@@ -57,6 +58,7 @@ class MainActivity : AppCompatActivity() {
 	private lateinit var uiLayout: UiLayout
 	private lateinit var channelSheet: ChannelSheetView
 	private lateinit var qualitySheet: QualitySheetView
+	private lateinit var updateManager: UpdateManager
 
 	private var lastChannel = Channels.DEFAULT_CHANNEL
 	private var lastQuality = Channels.DEFAULT_QUALITY
@@ -82,7 +84,7 @@ class MainActivity : AppCompatActivity() {
 			when (value) {
 				UiMode.CHANNELS -> {
 					qualitySheet.visibility = View.GONE
-					channelSheet.open(activeTab, lastChannel, qualityShort(lastQuality), favorites(), province)
+					channelSheet.open(activeTab, lastChannel, favorites(), province)
 					repostCloseAction()
 				}
 				UiMode.QUALITY -> {
@@ -106,6 +108,7 @@ class MainActivity : AppCompatActivity() {
 		loadState()
 		setupUi()
 		setupListeners()
+		updateManager = UpdateManager(this)
 		loadProvince()
 	}
 
@@ -128,8 +131,11 @@ class MainActivity : AppCompatActivity() {
 	}
 
 	private fun setupListeners() {
-		playerView.clickCallback = {
+		playerView.leftTapCallback = {
 			if (uiMode == UiMode.STANDARD) uiMode = UiMode.CHANNELS
+		}
+		playerView.rightTapCallback = {
+			if (uiMode == UiMode.STANDARD) uiMode = UiMode.QUALITY
 		}
 		playerView.swipeNextCallback = {
 			if (uiMode == UiMode.STANDARD) switchChannelByStep(forward = true)
@@ -146,6 +152,10 @@ class MainActivity : AppCompatActivity() {
 				toast("已连接央视频")
 			}
 		}
+		playerView.onFirstFrame = {
+			// 首帧就绪后延迟检查更新, 不打断观赏
+			mainLayout.postDelayed({ updateManager.checkAndPrompt() }, 5000)
+		}
 		channelSheet.callback = object : ChannelSheetView.Callback {
 			override fun onChannelSelected(name: String, tab: Int) {
 				activeTab = tab
@@ -156,10 +166,6 @@ class MainActivity : AppCompatActivity() {
 			override fun onFavoriteToggle(name: String) {
 				toggleFavorite(name)
 			}
-
-			override fun onQualityRequested() {
-				uiMode = UiMode.QUALITY
-			}
 		}
 		channelSheet.onDismissCallback = { uiMode = UiMode.STANDARD }
 		qualitySheet.callback = object : QualitySheetView.Callback {
@@ -167,7 +173,7 @@ class MainActivity : AppCompatActivity() {
 				lastQuality = label
 				saveState()
 				playerView.setQuality(label)
-				channelSheet.setCurrent(lastChannel, qualityShort(label))
+				channelSheet.setCurrent(lastChannel)
 				toast("已切换为 $label")
 				uiMode = UiMode.STANDARD
 			}
@@ -271,7 +277,7 @@ class MainActivity : AppCompatActivity() {
 		lastChannel = name
 		saveState()
 		playerView.switchChannel(name)
-		channelSheet.setCurrent(name, qualityShort(lastQuality))
+		channelSheet.setCurrent(name)
 		toastChannel(name)
 	}
 

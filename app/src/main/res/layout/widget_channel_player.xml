@@ -15,4 +15,29 @@
 		android:layout_height="match_parent"
 		android:layout_gravity="center" />
 
+	<!-- 启动加载遮罩: 纯黑, 首帧就绪前盖住网页 -->
+	<LinearLayout
+		android:id="@+id/loadingOverlay"
+		android:layout_width="match_parent"
+		android:layout_height="match_parent"
+		android:background="#FF000000"
+		android:gravity="center"
+		android:orientation="vertical">
+
+		<ProgressBar
+			android:layout_width="34dp"
+			android:layout_height="34dp"
+			android:indeterminate="true"
+			android:indeterminateTint="#F2B33D" />
+
+		<TextView
+			android:id="@+id/tvLoading"
+			android:layout_width="wrap_content"
+			android:layout_height="wrap_content"
+			android:layout_marginTop="14dp"
+			android:text="正在加载中"
+			android:textColor="#FF8A94A6"
+			android:textSize="13sp" />
+	</LinearLayout>
+
 </merge>

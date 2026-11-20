@@ -5,22 +5,26 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.Rect
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.AttributeSet
 import android.view.GestureDetector
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.MotionEvent
+import android.view.View
+import android.view.ViewGroup
 import android.widget.FrameLayout
 import com.vasthread.webviewtv.R
 
 /**
- * 播放器视图: 遮罩防误触 + 映射点击。
+ * 播放器视图: 启动遮罩 + 防误触遮罩 + 映射点击。
  *
  * 触摸:
- *   - 单击屏幕: 唤起换台弹窗
- *   - 向上滑动: 下一个频道(往下播放)
- *   - 向下滑动: 上一个频道(往上播放)
- *   触摸不透传给网页, 防止误触。
+ *   - 单击屏幕左半边: 唤起频道列表
+ *   - 单击屏幕右半边: 唤起清晰度
+ *   - 向上滑动: 下一个频道; 向下滑动: 上一个频道
+ *   触摸不透传给网页。
  * 电视: 按键不透传给网页, 全部交由 MainActivity 处理。
  */
 class ChannelPlayerView @JvmOverloads constructor(
@@ -30,13 +34,20 @@ class ChannelPlayerView @JvmOverloads constructor(
     companion object {
         private const val SWIPE_VELOCITY_THRESHOLD = 900f
         private const val SWIPE_DISTANCE_THRESHOLD = 60f
+        private const val LOADING_SAFETY_TIMEOUT = 30000L
     }
+
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     val webView: WebpageAdapterWebView
     private val fullscreenContainer: FrameLayout
+    private val loadingOverlay: View
 
-    /** 单击屏幕 */
-    var clickCallback: (() -> Unit)? = null
+    /** 单击左半边 -> 频道列表 */
+    var leftTapCallback: (() -> Unit)? = null
+
+    /** 单击右半边 -> 清晰度 */
+    var rightTapCallback: (() -> Unit)? = null
 
     /** 向上滑动 -> 下一个频道 */
     var swipeNextCallback: (() -> Unit)? = null
@@ -47,10 +58,13 @@ class ChannelPlayerView @JvmOverloads constructor(
     /** 注入脚本就绪 */
     var onScriptReady: (() -> Unit)? = null
 
-    /** 页面加载完成 */
-    var onPageReady: (() -> Unit)? = null
+    /** 首帧就绪(视频起播且沉浸式样式已应用) */
+    var onFirstFrame: (() -> Unit)? = null
 
     private var started = false
+    private var firstFrame = false
+
+    private val hideLoadingAction = Runnable { hideLoading() }
 
     private val gestureDetector = GestureDetector(context, object : GestureDetector.OnGestureListener {
 
@@ -60,7 +74,9 @@ class ChannelPlayerView @JvmOverloads constructor(
 
         @SuppressLint("ClickableViewAccessibility")
         override fun onSingleTapUp(e: MotionEvent): Boolean {
-            clickCallback?.invoke()
+            if (firstFrame) {
+                if (e.x < width / 2f) leftTapCallback?.invoke() else rightTapCallback?.invoke()
+            }
             return true
         }
 
@@ -69,7 +85,7 @@ class ChannelPlayerView @JvmOverloads constructor(
         override fun onLongPress(e: MotionEvent) = Unit
 
         override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
-            if (e1 == null || e2 == null) return false
+            if (!firstFrame || e1 == null || e2 == null) return false
             val dy = e2.y - e1.y
             val absDy = Math.abs(dy)
             val absDx = Math.abs(e2.x - e1.x)
@@ -95,10 +111,15 @@ class ChannelPlayerView @JvmOverloads constructor(
         setBackgroundColor(Color.BLACK)
         webView = findViewById(R.id.webView)
         fullscreenContainer = findViewById(R.id.fullscreenContainer)
+        loadingOverlay = findViewById(R.id.loadingOverlay)
         webView.apply {
             this.fullscreenContainer = this@ChannelPlayerView.fullscreenContainer
-            onPageReady = { this@ChannelPlayerView.onPageReady?.invoke() }
             onScriptReady = { this@ChannelPlayerView.onScriptReady?.invoke() }
+            onFirstFrame = {
+                this@ChannelPlayerView.firstFrame = true
+                hideLoading()
+                this@ChannelPlayerView.onFirstFrame?.invoke()
+            }
         }
     }
 
@@ -106,7 +127,32 @@ class ChannelPlayerView @JvmOverloads constructor(
     fun start() {
         if (started) return
         started = true
+        showLoading()
         webView.loadUrl(WebpageAdapterWebView.URL_HOME)
+    }
+
+    /** 显示启动遮罩 */
+    fun showLoading() {
+        mainHandler.removeCallbacks(hideLoadingAction)
+        loadingOverlay.animate().cancel()
+        loadingOverlay.alpha = 1f
+        loadingOverlay.visibility = View.VISIBLE
+        // 保险: 即使首帧异常也不永远黑屏
+        mainHandler.postDelayed(hideLoadingAction, LOADING_SAFETY_TIMEOUT)
+    }
+
+    /** 隐藏启动遮罩(淡出) */
+    fun hideLoading() {
+        if (loadingOverlay.visibility != View.VISIBLE) return
+        mainHandler.removeCallbacks(hideLoadingAction)
+        loadingOverlay.animate()
+            .alpha(0f)
+            .setDuration(320)
+            .withEndAction {
+                loadingOverlay.visibility = View.GONE
+                loadingOverlay.alpha = 1f
+            }
+            .start()
     }
 
     fun switchChannel(name: String) = webView.switchChannel(name)

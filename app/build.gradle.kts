@@ -11,8 +11,8 @@ android {
         applicationId = "com.stevekazer.yangshiplive"
         minSdk = 21
         targetSdk = 34
-        versionCode = 21
-        versionName = "2.1.0-yangshipin"
+        versionCode = 22
+        versionName = "2.2.0-yangshipin"
     }
 
     buildTypes {
@@ -29,6 +29,10 @@ android {
     }
     kotlinOptions {
         jvmTarget = "1.8"
+    }
+    buildFeatures {
+        // 自动更新需要读取 BuildConfig.VERSION_NAME
+        buildConfig = true
     }
 }
 

@@ -12,7 +12,6 @@ import android.view.Gravity
 import android.view.View
 import android.webkit.JavascriptInterface
 import android.widget.FrameLayout
-import com.tencent.smtt.export.external.extension.interfaces.IX5WebSettingsExtension
 import com.tencent.smtt.export.external.extension.proxy.ProxyWebChromeClientExtension
 import com.tencent.smtt.export.external.extension.proxy.ProxyWebViewClientExtension
 import com.tencent.smtt.export.external.interfaces.ConsoleMessage
@@ -84,6 +83,9 @@ class WebpageAdapterWebView @JvmOverloads constructor(
 
     /** 页面脚本注入完成 */
     var onScriptReady: (() -> Unit)? = null
+
+    /** 首帧就绪(视频起播且沉浸式样式已应用) */
+    var onFirstFrame: (() -> Unit)? = null
 
     /** 页面加载完成(每次进度 100) */
     var onPageReady: (() -> Unit)? = null
@@ -195,8 +197,9 @@ class WebpageAdapterWebView @JvmOverloads constructor(
             setAppCacheEnabled(true)
             cacheMode = WebSettings.LOAD_DEFAULT
             userAgentString = PC_USER_AGENT
-            loadsImagesAutomatically = false
-            blockNetworkImage = true
+            // 允许加载图片(站内\"努力加载中\"转圈动画是图片, 必须开启)
+            loadsImagesAutomatically = true
+            blockNetworkImage = false
         }
         apply {
             webViewClient = client
@@ -227,9 +230,6 @@ class WebpageAdapterWebView @JvmOverloads constructor(
                     userAgentString = PC_USER_AGENT
                 }
                 chromeClient.videoRatio = RATIO_16_9
-                settingsExtension?.apply {
-                    setPicModel(IX5WebSettingsExtension.PicModel_NoPic)
-                }
                 injectedUrl = ""
                 scriptReady = false
                 Log.i(TAG, "Load url $url")
@@ -293,6 +293,12 @@ class WebpageAdapterWebView @JvmOverloads constructor(
     fun notifyScriptReady() {
         scriptReady = true
         post { onScriptReady?.invoke() }
+    }
+
+    /** 首帧就绪(视频起播且沉浸式样式已应用) */
+    @JavascriptInterface
+    fun notifyFirstFrame() {
+        post { onFirstFrame?.invoke() }
     }
 
     @JavascriptInterface
