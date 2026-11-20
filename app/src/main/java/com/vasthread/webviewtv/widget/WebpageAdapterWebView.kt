@@ -218,7 +218,7 @@ class WebpageAdapterWebView @JvmOverloads constructor(
     }
 
     @JavascriptInterface
-    fun loadUrl(url: String) {
+    override fun loadUrl(url: String) {
         requestedUrl = url
         CoroutineScope(Dispatchers.Main).launch {
             resetPage(url)
