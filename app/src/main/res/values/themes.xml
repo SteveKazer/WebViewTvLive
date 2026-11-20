@@ -13,16 +13,20 @@
 		<item name="android:windowBackground">@drawable/splash</item>
 	</style>
 
-	<style name="SheetTab">
-		<item name="android:layout_width">64dp</item>
-		<item name="android:layout_height">34dp</item>
-		<item name="android:layout_marginEnd">10dp</item>
+	<!-- 换台弹窗左侧分类项 -->
+	<style name="SheetCategory">
+		<item name="android:layout_width">match_parent</item>
+		<item name="android:layout_height">44dp</item>
+		<item name="android:layout_marginStart">8dp</item>
+		<item name="android:layout_marginEnd">8dp</item>
+		<item name="android:layout_marginBottom">4dp</item>
 		<item name="android:background">@drawable/bg_item</item>
 		<item name="android:focusable">true</item>
 		<item name="android:clickable">true</item>
-		<item name="android:gravity">center</item>
+		<item name="android:gravity">center_vertical</item>
+		<item name="android:paddingStart">12dp</item>
 		<item name="android:textColor">@color/color_text</item>
-		<item name="android:textSize">14sp</item>
+		<item name="android:textSize">15sp</item>
 	</style>
 
 	<style name="QualityOption">

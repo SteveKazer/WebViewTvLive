@@ -9,7 +9,6 @@ import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.Log
 import android.view.Gravity
-import android.view.KeyEvent
 import android.view.View
 import android.webkit.JavascriptInterface
 import android.widget.FrameLayout
@@ -20,7 +19,6 @@ import com.tencent.smtt.export.external.interfaces.ConsoleMessage
 import com.tencent.smtt.export.external.interfaces.IX5WebChromeClient
 import com.tencent.smtt.export.external.interfaces.JsResult
 import com.tencent.smtt.export.external.interfaces.MediaAccessPermissionsCallback
-import com.tencent.smtt.export.external.interfaces.PermissionRequest
 import com.tencent.smtt.export.external.interfaces.SslError
 import com.tencent.smtt.export.external.interfaces.SslErrorHandler
 import com.tencent.smtt.export.external.interfaces.WebResourceRequest
@@ -29,7 +27,6 @@ import com.tencent.smtt.sdk.WebChromeClient
 import com.tencent.smtt.sdk.WebSettings
 import com.tencent.smtt.sdk.WebView
 import com.tencent.smtt.sdk.WebViewClient
-import com.vasthread.webviewtv.misc.isMainThread
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -42,8 +39,13 @@ typealias LP = FrameLayout.LayoutParams
 
 /**
  * 央视频专用 WebView。
- * 保留原项目的腾讯 X5 电视浏览器环境与全屏视频(onShowCustomView)机制;
- * 全部页面适配逻辑(注入脚本/F键兜底)收敛在本类, 不再有适配器体系。
+ * 保留原项目的腾讯 X5 电视浏览器环境与全屏视频(onShowCustomView)机制。
+ *
+ * 全屏策略(多层兜底, 解决部分设备 JS 点击无效的问题):
+ *   1. JS 程序化点击页面"整体全屏"按钮
+ *   2. 真实触摸点击按钮坐标(传送到 WebView, 绕过遮罩)
+ *   3. 真实双击视频画面中心
+ *   4. 真实 F 键(video.js 快捷键)
  */
 @Suppress("unused", "DEPRECATION")
 @SuppressLint("SetJavaScriptEnabled")
@@ -62,8 +64,6 @@ class WebpageAdapterWebView @JvmOverloads constructor(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
         private const val CHECK_PAGE_LOADING_INTERVAL = 50L
         private const val BLANK_PAGE_WAIT = 800L
-        private const val KEY_CLICK_DURATION = 50L
-        private const val FS_KEY_MIN_INTERVAL = 2500L
 
         val RATIO_16_9 = Fraction.getFraction(16, 9)!!
         val RATIO_4_3 = Fraction.getFraction(4, 3)!!
@@ -77,12 +77,15 @@ class WebpageAdapterWebView @JvmOverloads constructor(
     private val videoSize = Point()
     private var isInFullscreen = false
     private var injectedUrl = ""
-    private var lastFullscreenKeyAt = 0L
+    private var scriptReady = false
     private val loadingInfo = PageLoadingInfo("", false)
 
     lateinit var fullscreenContainer: FrameLayout
 
-    /** 页面加载并注入脚本完成, 可执行 restore 等后续指令 */
+    /** 页面脚本注入完成 */
+    var onScriptReady: (() -> Unit)? = null
+
+    /** 页面加载完成(每次进度 100) */
     var onPageReady: (() -> Unit)? = null
 
     fun interface JsCallback { fun onResult(result: String) }
@@ -173,10 +176,6 @@ class WebpageAdapterWebView @JvmOverloads constructor(
             callback = null
             isInFullscreen = false
         }
-
-        override fun onPermissionRequest(request: PermissionRequest) {
-            super.onPermissionRequest(request)
-        }
     }
 
     private val chromeClientExtension = object : ProxyWebChromeClientExtension() {
@@ -232,6 +231,7 @@ class WebpageAdapterWebView @JvmOverloads constructor(
                     setPicModel(IX5WebSettingsExtension.PicModel_NoPic)
                 }
                 injectedUrl = ""
+                scriptReady = false
                 Log.i(TAG, "Load url $url")
                 super@WebpageAdapterWebView.loadUrl(url)
             } else {
@@ -267,6 +267,28 @@ class WebpageAdapterWebView @JvmOverloads constructor(
         post { evaluateJavascript(js) { value -> callback?.onResult(value) } }
     }
 
+    /** 同步执行 JS 并取回字符串结果(空串表示失败) */
+    private suspend fun awaitJs(js: String): String = suspendCancellableCoroutine { cont ->
+        val done = AtomicBoolean(false)
+        post {
+            try {
+                evaluateJavascript(js) { value ->
+                    if (done.compareAndSet(false, true)) {
+                        var v = value ?: ""
+                        // evaluateJavascript 返回 JSON 编码字符串, 去掉包裹引号
+                        if (v.length >= 2 && v.startsWith("\"") && v.endsWith("\"")) {
+                            v = v.substring(1, v.length - 1)
+                        }
+                        if (v == "null") v = ""
+                        cont.resume(v)
+                    }
+                }
+            } catch (e: Throwable) {
+                if (done.compareAndSet(false, true)) cont.resume("")
+            }
+        }
+    }
+
     /** 换台: 隐藏鼠标点击页面频道按钮 */
     fun switchChannel(name: String) {
         evaluate("window.__WVT__ && __WVT__.switchChannel('${name.escapeJs()}')")
@@ -282,45 +304,25 @@ class WebpageAdapterWebView @JvmOverloads constructor(
         evaluate("window.__WVT__ && __WVT__.restore('${channel.escapeJs()}','${quality.escapeJs()}')")
     }
 
-    fun queryState(callback: JsCallback) {
-        evaluate("window.__WVT__ ? __WVT__.getState() : '{}'", callback)
-    }
-
     fun pauseVideo() = evaluate("window.__WVT__ && __WVT__.pause()")
 
     fun playVideo() = evaluate("window.__WVT__ && __WVT__.play()")
 
     // ---------------- JS -> 原生 ----------------
 
-    /** 页面请求原生注入一次 F 键(全屏兜底, video.js 快捷键) */
+    /** 注入脚本就绪 */
     @JavascriptInterface
-    fun requestKeyFullscreen() {
-        if (isInFullscreen()) return
-        CoroutineScope(Dispatchers.Main).launch { pressFullscreenKey() }
+    fun notifyScriptReady() {
+        scriptReady = true
+        post { onScriptReady?.invoke() }
     }
 
-    /** 视频在播状态上报 */
     @JavascriptInterface
     fun notifyVideoPlaying() {}
 
     @JavascriptInterface
     fun setVideoSize(width: Int, height: Int) {
         videoSize.set(width, height)
-    }
-
-    fun getVideoSize() = videoSize
-
-    private suspend fun pressFullscreenKey() {
-        val now = SystemClock.uptimeMillis()
-        if (now - lastFullscreenKeyAt < FS_KEY_MIN_INTERVAL) return
-        lastFullscreenKeyAt = now
-        requestFocus()
-        val downTime = SystemClock.uptimeMillis()
-        dispatchKeyEvent(KeyEvent(downTime, downTime, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_F, 0))
-        delay(KEY_CLICK_DURATION)
-        if (isInFullscreen()) return
-        dispatchKeyEvent(KeyEvent(downTime, SystemClock.uptimeMillis(), KeyEvent.ACTION_UP, KeyEvent.KEYCODE_F, 0))
-        Log.i(TAG, "Fullscreen key pressed.")
     }
 
     private fun String.escapeJs() = replace("\\", "\\\\").replace("'", "\\'")

@@ -6,6 +6,9 @@ on:
     tags: [ 'v*' ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -28,6 +31,12 @@ jobs:
       - name: Build debug & release APK
         run: ./gradlew assembleDebug assembleRelease --stacktrace
 
+      - name: Rename release APK (tag builds)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          cd app/build/outputs/apk/release
+          mv app-release.apk "YangshipinTV-${GITHUB_REF_NAME}.apk"
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
@@ -44,4 +53,18 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          name: 央视频TV ${{ github.ref_name }}
+          body: |
+            ## 央视频TV ${{ github.ref_name }}
+
+            单源极简电视直播：只使用央视频官方网页 tv/home，一个标签页看遍央视与卫视。
+
+            - 沉浸式画面：打开即铺满整屏，不显示网页按钮与栏目
+            - 频道：央视 CCTV1-14 + 24 个卫视（已剔除付费频道）
+            - 侧边抽屉换台面板：全部 / 央视 / 卫视 / ★收藏
+            - 长按收藏、数字键选台（央视 1-14，卫视 101-124）
+            - 地区卫视优先、记忆上次频道与清晰度
+            - 手机触摸与电视遥控双端适配
+
+            安装：下载下方 APK 直接安装。首次启动会自动下载 X5 内核，请耐心等待。
           files: app/build/outputs/apk/release/*.apk

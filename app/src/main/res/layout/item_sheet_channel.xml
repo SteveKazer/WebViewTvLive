@@ -3,36 +3,65 @@
 	xmlns:android="http://schemas.android.com/apk/res/android"
 	android:layout_width="match_parent"
 	android:layout_height="wrap_content"
-	android:layout_margin="4dp"
+	android:layout_marginBottom="6dp"
 	android:background="@drawable/bg_item"
+	android:clickable="true"
 	android:focusable="true"
-	android:gravity="center"
-	android:orientation="vertical"
-	android:paddingTop="10dp"
-	android:paddingBottom="10dp">
+	android:gravity="center_vertical"
+	android:minHeight="54dp"
+	android:orientation="horizontal"
+	android:paddingStart="10dp"
+	android:paddingEnd="12dp">
 
+	<!-- 数字键编号 -->
+	<TextView
+		android:id="@+id/tvNumber"
+		android:layout_width="46dp"
+		android:layout_height="26dp"
+		android:background="@drawable/bg_number"
+		android:gravity="center"
+		android:text="001"
+		android:textColor="#FFD0D6E0"
+		android:textSize="12sp"
+		android:textStyle="bold" />
+
+	<!-- 台标徽章 -->
 	<TextView
 		android:id="@+id/tvBadge"
-		android:layout_width="56dp"
-		android:layout_height="32dp"
+		android:layout_width="44dp"
+		android:layout_height="30dp"
+		android:layout_marginStart="10dp"
 		android:gravity="center"
-		android:paddingStart="4dp"
-		android:paddingEnd="4dp"
+		android:paddingStart="2dp"
+		android:paddingEnd="2dp"
 		android:text="央一"
 		android:textColor="#FFFFFFFF"
-		android:textSize="13sp"
+		android:textSize="12sp"
 		android:textStyle="bold" />
 
 	<TextView
 		android:id="@+id/tvChannelName"
-		android:layout_width="match_parent"
+		android:layout_width="0dp"
 		android:layout_height="wrap_content"
-		android:layout_marginTop="6dp"
+		android:layout_marginStart="12dp"
+		android:layout_weight="1"
 		android:ellipsize="end"
-		android:gravity="center"
 		android:maxLines="1"
 		android:text="CCTV1"
-		android:textColor="@color/color_text"
-		android:textSize="12sp" />
+		android:textColor="#FFEDF1F7"
+		android:textSize="16sp" />
+
+	<TextView
+		android:id="@+id/tvPlaying"
+		android:layout_width="wrap_content"
+		android:layout_height="22dp"
+		android:background="@drawable/bg_playing"
+		android:gravity="center"
+		android:paddingStart="8dp"
+		android:paddingEnd="8dp"
+		android:text="播放中"
+		android:textColor="#FFFFFFFF"
+		android:textSize="11sp"
+		android:visibility="gone" />
 
 </LinearLayout>

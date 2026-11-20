@@ -16,21 +16,38 @@ import com.vasthread.webviewtv.R
 /**
  * 播放器视图: 遮罩防误触 + 映射点击。
  *
- * - 触摸设备: 屏幕触摸一律不透传给网页(防误触遮罩), 单击只回调唤起换台弹窗。
- * - 电视: 按键不透传给网页, 全部交由 MainActivity 处理遥控导航。
- * - 换台/清晰度: 通过注入脚本以"隐藏鼠标"点击页面按钮, 永远停留在一个标签页。
+ * 触摸:
+ *   - 单击屏幕: 唤起换台弹窗
+ *   - 向上滑动: 下一个频道(往下播放)
+ *   - 向下滑动: 上一个频道(往上播放)
+ *   触摸不透传给网页, 防止误触。
+ * 电视: 按键不透传给网页, 全部交由 MainActivity 处理。
  */
 class ChannelPlayerView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
 ) : FrameLayout(context, attrs, defStyleAttr) {
 
+    companion object {
+        private const val SWIPE_VELOCITY_THRESHOLD = 900f
+        private const val SWIPE_DISTANCE_THRESHOLD = 60f
+    }
+
     val webView: WebpageAdapterWebView
     private val fullscreenContainer: FrameLayout
 
-    /** 单击屏幕回调 */
+    /** 单击屏幕 */
     var clickCallback: (() -> Unit)? = null
 
-    /** 页面就绪回调(脚本已注入, 可执行恢复动作) */
+    /** 向上滑动 -> 下一个频道 */
+    var swipeNextCallback: (() -> Unit)? = null
+
+    /** 向下滑动 -> 上一个频道 */
+    var swipePrevCallback: (() -> Unit)? = null
+
+    /** 注入脚本就绪 */
+    var onScriptReady: (() -> Unit)? = null
+
+    /** 页面加载完成 */
     var onPageReady: (() -> Unit)? = null
 
     private var started = false
@@ -51,7 +68,23 @@ class ChannelPlayerView @JvmOverloads constructor(
 
         override fun onLongPress(e: MotionEvent) = Unit
 
-        override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float) = false
+        override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
+            if (e1 == null || e2 == null) return false
+            val dy = e2.y - e1.y
+            val absDy = Math.abs(dy)
+            val absDx = Math.abs(e2.x - e1.x)
+            if (absDy < SWIPE_DISTANCE_THRESHOLD || absDy < absDx) return false
+            val fastEnough = Math.abs(velocityY) > SWIPE_VELOCITY_THRESHOLD || absDy > 160f
+            if (!fastEnough) return false
+            if (dy < 0) {
+                // 手指向上滑 -> 往下切换(下一个)
+                swipeNextCallback?.invoke()
+            } else {
+                // 手指向下滑 -> 往上切换(上一个)
+                swipePrevCallback?.invoke()
+            }
+            return true
+        }
     })
 
     init {
@@ -65,6 +98,7 @@ class ChannelPlayerView @JvmOverloads constructor(
         webView.apply {
             this.fullscreenContainer = this@ChannelPlayerView.fullscreenContainer
             onPageReady = { this@ChannelPlayerView.onPageReady?.invoke() }
+            onScriptReady = { this@ChannelPlayerView.onScriptReady?.invoke() }
         }
     }
 
@@ -75,13 +109,10 @@ class ChannelPlayerView @JvmOverloads constructor(
         webView.loadUrl(WebpageAdapterWebView.URL_HOME)
     }
 
-    /** 映射换台: 隐藏鼠标点击页面频道按钮 */
     fun switchChannel(name: String) = webView.switchChannel(name)
 
-    /** 映射设置清晰度 */
     fun setQuality(qualityLabel: String) = webView.setQuality(qualityLabel)
 
-    /** 启动恢复上次频道/清晰度 */
     fun restore(channel: String, quality: String) = webView.restore(channel, quality)
 
     fun pauseVideo() = webView.pauseVideo()
