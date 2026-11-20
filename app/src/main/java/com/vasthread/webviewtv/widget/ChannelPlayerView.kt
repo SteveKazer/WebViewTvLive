@@ -58,6 +58,9 @@ class ChannelPlayerView @JvmOverloads constructor(
     /** 注入脚本就绪 */
     var onScriptReady: (() -> Unit)? = null
 
+    /** 页面加载完成 */
+    var onPageReady: (() -> Unit)? = null
+
     /** 首帧就绪(视频起播且沉浸式样式已应用) */
     var onFirstFrame: (() -> Unit)? = null
 
@@ -115,6 +118,7 @@ class ChannelPlayerView @JvmOverloads constructor(
         webView.apply {
             this.fullscreenContainer = this@ChannelPlayerView.fullscreenContainer
             onScriptReady = { this@ChannelPlayerView.onScriptReady?.invoke() }
+            onPageReady = { this@ChannelPlayerView.onPageReady?.invoke() }
             onFirstFrame = {
                 this@ChannelPlayerView.firstFrame = true
                 hideLoading()
