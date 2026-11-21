@@ -45,6 +45,9 @@ class QualitySheetView @JvmOverloads constructor(
     private val options = mutableListOf<TextView>()
     private val labels = Channels.QUALITIES.toList()
 
+    /** 当前清晰度前缀(如"蓝光"), 焦点失焦时按它恢复选中项颜色 */
+    private var selectedPrefix = ""
+
     var callback: Callback? = null
     var onDismissCallback: (() -> Unit)? = null
 
@@ -90,6 +93,12 @@ class QualitySheetView @JvmOverloads constructor(
                 isClickable = true
                 background = itemBackground(ui.dp(5f) * 1.6f)
                 setOnClickListener { callback?.onQualitySelected(labels[index]) }
+                // 焦点态: 黄底黑字; 失焦按选中状态恢复(修复焦点黄底看不见字)
+                setOnFocusChangeListener { v, hasFocus ->
+                    v as TextView
+                    if (hasFocus) v.setTextColor(focusTextColor())
+                    else v.setTextColor(if (labels[index].startsWith(selectedPrefix)) COLOR_ACCENT else COLOR_TEXT)
+                }
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(40f)
                 ).apply { bottomMargin = ui.dp(3f) }
@@ -114,28 +123,42 @@ class QualitySheetView @JvmOverloads constructor(
                 LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(46f)
             )
         }
-        settings.addView(TextView(context).apply {
+        val settingsTitle = TextView(context).apply {
             text = "设置"
             setTextColor(COLOR_TEXT)
             setTextSize(TypedValue.COMPLEX_UNIT_PX, ui.sp(13f))
             gravity = Gravity.CENTER
-        })
-        settings.addView(TextView(context).apply {
+        }
+        val settingsHint = TextView(context).apply {
             text = "敬请期待"
             setTextColor(COLOR_MUTED)
             setTextSize(TypedValue.COMPLEX_UNIT_PX, ui.sp(9f))
             gravity = Gravity.CENTER
-        })
+        }
+        settings.addView(settingsTitle)
+        settings.addView(settingsHint)
         panel.addView(settings)
+
+        // 焦点态文字颜色: 焦点背景为琥珀黄, 文字用深黑保证可读(修复黄底看不见字)
+        val focusText = 0xFF1A1A1A.toInt()
+        settings.setOnFocusChangeListener { _, hasFocus ->
+            settingsTitle.setTextColor(if (hasFocus) focusText else COLOR_TEXT)
+            settingsHint.setTextColor(if (hasFocus) focusText else COLOR_MUTED)
+        }
     }
+
+    /** 焦点态文字色 */
+    private fun focusTextColor() = 0xFF1A1A1A.toInt()
 
     fun open(quality: String) {
         val prefix = quality.substringBefore(' ')
+        selectedPrefix = prefix
         var selected = 0
         options.forEachIndexed { index, option ->
             val isCurrent = labels[index].startsWith(prefix)
             if (isCurrent) selected = index
-            option.setTextColor(if (isCurrent) COLOR_ACCENT else COLOR_TEXT)
+            // 焦点中的选项交给焦点监听器保持黑字(黄底可读)
+            if (!option.isFocused) option.setTextColor(if (isCurrent) COLOR_ACCENT else COLOR_TEXT)
         }
         visibility = VISIBLE
         post { options.getOrNull(selected)?.requestFocus() }

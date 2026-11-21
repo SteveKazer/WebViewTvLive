@@ -91,6 +91,12 @@ class WebpageAdapterWebView @JvmOverloads constructor(
     /** 页面频道检测上报(注入脚本扫描页面频道 pill 后回调) */
     var onChannelsDetected: ((String) -> Unit)? = null
 
+    /** JS 发起的切流开始(看门狗自动降档等), 提示上层盖切流遮罩 */
+    var onStreamSwitchBegin: (() -> Unit)? = null
+
+    /** 每次切流后视频真正恢复播放(rs>=3 且未暂停), 提示上层揭幕 */
+    var onPlaybackResumed: (() -> Unit)? = null
+
     fun interface JsCallback { fun onResult(result: String) }
 
     private val client = object : WebViewClient() {
@@ -301,6 +307,18 @@ class WebpageAdapterWebView @JvmOverloads constructor(
     @JavascriptInterface
     fun notifyChannels(json: String) {
         post { onChannelsDetected?.invoke(json) }
+    }
+
+    /** JS 发起的切流开始(看门狗自动降档等, 页面自行切清晰度时) */
+    @JavascriptInterface
+    fun notifySwitchBegin() {
+        post { onStreamSwitchBegin?.invoke() }
+    }
+
+    /** 每次切流后视频真正恢复播放 */
+    @JavascriptInterface
+    fun notifyPlaybackResumed() {
+        post { onPlaybackResumed?.invoke() }
     }
 
     @JavascriptInterface

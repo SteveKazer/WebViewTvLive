@@ -36,6 +36,7 @@ class ChannelPlayerView @JvmOverloads constructor(
         private const val SWIPE_VELOCITY_THRESHOLD = 900f
         private const val SWIPE_DISTANCE_THRESHOLD = 60f
         private const val LOADING_SAFETY_TIMEOUT = 30000L
+        private const val SWITCH_COVER_SAFETY_TIMEOUT = 15000L
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -43,6 +44,8 @@ class ChannelPlayerView @JvmOverloads constructor(
     val webView: WebpageAdapterWebView
     private val fullscreenContainer: FrameLayout
     private val loadingOverlay: View
+    private val switchCover: View
+    private val hideSwitchCoverAction = Runnable { hideSwitchCover() }
 
     /** 单击左半边 -> 频道列表 */
     var leftTapCallback: (() -> Unit)? = null
@@ -67,6 +70,9 @@ class ChannelPlayerView @JvmOverloads constructor(
 
     /** 首帧就绪(视频起播且沉浸式样式已应用) */
     var onFirstFrame: (() -> Unit)? = null
+
+    /** 每次切流后视频真正恢复播放(JS 判定 rs>=3 且未暂停) */
+    var onPlaybackResumed: (() -> Unit)? = null
 
     private var started = false
     private var firstFrame = false
@@ -122,6 +128,7 @@ class ChannelPlayerView @JvmOverloads constructor(
         webView = findViewById(R.id.webView)
         fullscreenContainer = findViewById(R.id.fullscreenContainer)
         loadingOverlay = findViewById(R.id.loadingOverlay)
+        switchCover = findViewById(R.id.switchCover)
         webView.apply {
             this.fullscreenContainer = this@ChannelPlayerView.fullscreenContainer
             onScriptReady = { this@ChannelPlayerView.onScriptReady?.invoke() }
@@ -131,6 +138,13 @@ class ChannelPlayerView @JvmOverloads constructor(
                 this@ChannelPlayerView.firstFrame = true
                 hideLoading()
                 this@ChannelPlayerView.onFirstFrame?.invoke()
+            }
+            // JS 看门狗自动降档等场景: 切流开始 -> 盖黑幕
+            onStreamSwitchBegin = { this@ChannelPlayerView.showSwitchCover() }
+            // 视频真正起播 -> 揭幕
+            onPlaybackResumed = {
+                this@ChannelPlayerView.hideSwitchCover()
+                this@ChannelPlayerView.onPlaybackResumed?.invoke()
             }
         }
     }
@@ -167,9 +181,42 @@ class ChannelPlayerView @JvmOverloads constructor(
             .start()
     }
 
-    fun switchChannel(name: String) = webView.switchChannel(name)
+    /**
+     * 显示切流遮罩: 换台/切清晰度全程纯黑盖住 WebView,
+     * 防止设备端 WebView 在视频表面渲染原生占位图形(黑色大三角)。
+     * 若播放恢复通知丢失, 15 秒后自动揭幕兑底。
+     */
+    fun showSwitchCover() {
+        mainHandler.removeCallbacks(hideSwitchCoverAction)
+        switchCover.animate().cancel()
+        switchCover.alpha = 1f
+        switchCover.visibility = View.VISIBLE
+        mainHandler.postDelayed(hideSwitchCoverAction, SWITCH_COVER_SAFETY_TIMEOUT)
+    }
 
-    fun setQuality(qualityLabel: String) = webView.setQuality(qualityLabel)
+    /** 收到"视频真正起播"后揭幕(快速淡出) */
+    fun hideSwitchCover() {
+        mainHandler.removeCallbacks(hideSwitchCoverAction)
+        if (switchCover.visibility != View.VISIBLE) return
+        switchCover.animate()
+            .alpha(0f)
+            .setDuration(250)
+            .withEndAction {
+                switchCover.visibility = View.GONE
+                switchCover.alpha = 1f
+            }
+            .start()
+    }
+
+    fun switchChannel(name: String) {
+        showSwitchCover()
+        webView.switchChannel(name)
+    }
+
+    fun setQuality(qualityLabel: String) {
+        showSwitchCover()
+        webView.setQuality(qualityLabel)
+    }
 
     fun restore(channel: String, quality: String) = webView.restore(channel, quality)
 

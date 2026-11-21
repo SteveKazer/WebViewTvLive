@@ -1,7 +1,7 @@
 // =====================================================================
 // 央视频TV 注入脚本 (注入到 https://www.yangshipin.cn/tv/home)
 // ---------------------------------------------------------------------
-// 核心思想: 只打开一个标签页, 沉浸式播放。(v2.4.0 系统 WebView/Chromium 版)
+// 核心思想: 只打开一个标签页, 沉浸式播放。(v2.4.1 系统 WebView/Chromium 版)
 //
 // 沉浸式方案(已实测):
 //   页面自身的"全屏"按钮在部分设备上不可靠, 因此改为注入 CSS:
@@ -15,9 +15,16 @@
 //   当前频道:  .tvSelect
 //   清晰度:    .bei-list .item (蓝光/超清/高清, 隐藏态可直接点击)
 //
+// 切流黑幕(双保险):
+//   - JS 层: 动作第一行立即隐藏 video 元素(visibility:hidden)
+//   - 原生层: notifySwitchBegin() 通知 App 盖原生黑幕遮罩,
+//     防止设备端 WebView 在视频表面渲染原生占位图形(黑色大三角,
+//     不在 DOM 内、CSS 无法隐藏、桌面 Chromium 不出现)。
+//   视频真正恢复播放(rs>=3 且未暂停)后 notifyPlaybackResumed() 揭幕。
+//
 // 视频隐藏器:
 //   视频 paused/无数据或换台/切清晰度瞬间(在动作第一行)直接把 video 元素
-//   visibility:hidden —— 切换过程黑幕平滑过渡、不露旧画面/控制条, 
+//   visibility:hidden —— 切换过程黑幕平滑过渡、不露旧画面/控制条,
 //   恢复播放(playing/canplay)立即恢复显示; 事件驱动 + 200ms 轮询兑底。
 //
 // 频道检测:
@@ -90,6 +97,26 @@
 		log('immersive css injected');
 	}
 
+	// 调用原生盖切流黑幕(仅当原生遮罩存在时生效, 桌面环境忽略)
+	function notifySwitchBegin() {
+		try {
+			if (window.main && typeof window.main.notifySwitchBegin === 'function') { window.main.notifySwitchBegin(); }
+		} catch (e) { /* ignore */ }
+	}
+
+	// 视频真正恢复播放且确实有画面后, 通知原生揭幕
+	function notifyPlaybackResumed() {
+		try {
+			if (window.main && typeof window.main.notifyPlaybackResumed === 'function') { window.main.notifyPlaybackResumed(); }
+		} catch (e) { /* ignore */ }
+	}
+
+	// 调用原生盖切流黑幕并隐藏视频表面(切流动作统一入口)
+	function beginStreamSwitch(videoEl) {
+		setVideoSurface(videoEl || q('video'), true);
+		notifySwitchBegin();
+	}
+
 	window.__WVT__ = {
 
 		// 换台: 映射点击页面频道按钮
@@ -98,7 +125,7 @@
 			if (!pill) { console.error('[WVT] channel not found: ' + name); return false; }
 			var cur = q('.tvSelect');
 			if (cur && norm(cur.textContent) === norm(name)) { return true; } // 已是该频道
-			setVideoSurface(q('video'), true); // 动作瞬间即隐藏视频, 切换过程黑幕平滑过渡
+			beginStreamSwitch(); // 动作瞬间: 隐藏视频 + 原生黑幕, 平滑过渡
 			pill.click();
 			stallSince = Date.now(); // 换台后重置卡住计时
 			log('switchChannel -> ' + name);
@@ -111,8 +138,8 @@
 			var target = norm(label);
 			for (var i = 0; i < items.length; i++) {
 				if (norm(items[i].textContent).indexOf(target) >= 0) {
-					if (!/active/.test(items[i].className)) {
-						setVideoSurface(q('video'), true); // 切流瞬间即隐藏, 平滑过渡
+				if (!/active/.test(items[i].className)) {
+						beginStreamSwitch(); // 切流瞬间隐藏 + 原生黑幕
 						items[i].click();
 					}
 					log('setQuality -> ' + label);
@@ -141,19 +168,22 @@
 			});
 		},
 
-		// 启动恢复: 等视频起播后, 切换到上次频道 + 上次清晰度
+		// 启动恢复: 页面频道列表一旦就绪立即切换(不等默认频道起播,
+		// 省一次完整加载约 3~8 秒), 清晰度随后跟设
 		restore: function(channel, quality) {
 			var tries = 0;
 			function tryRestore() {
-				var v = q('video');
-				if (v && !v.paused) {
-					if (channel) { window.__WVT__.switchChannel(channel); }
-					if (quality) {
-						setTimeout(function() { window.__WVT__.setQuality(quality); }, 1500);
-					}
+				var pill = channel ? findPill(channel) : null;
+				if (channel && pill) {
+					setTimeout(function() { // 等 Vue 事件绑定稳定
+						window.__WVT__.switchChannel(channel);
+						if (quality) {
+							setTimeout(function() { window.__WVT__.setQuality(quality); }, 1500);
+						}
+				}, 300);
 					return;
 				}
-				if (++tries < 45) { setTimeout(tryRestore, 500); } // 最多等待 ~22 秒
+				if (++tries < 45) { setTimeout(tryRestore, 400); } // 最多等待 ~18 秒
 				else { log('restore timeout, keep default channel'); }
 			}
 			tryRestore();
@@ -209,7 +239,15 @@
 		try {
 			v.addEventListener('pause', function() { setVideoSurface(v, true); });
 			v.addEventListener('emptied', function() { setVideoSurface(v, true); });
-			v.addEventListener('playing', function() { setVideoSurface(v, false); });
+			v.addEventListener('playing', function() {
+				setVideoSurface(v, false);
+				// 视频真正起播且确有画面后再揭幕(延迟片刻核对, 防止 rs 不足的假起播)
+				setTimeout(function() {
+					if (!v.paused && v.readyState >= 3 && v.videoWidth > 0) {
+					notifyPlaybackResumed();
+					}
+				}, 500);
+			});
 			v.addEventListener('canplay', function() { if (!v.paused) { setVideoSurface(v, false); } });
 		} catch (e) { /* ignore */ }
 	}
@@ -275,6 +313,7 @@
 					log('stall watchdog: force play()');
 				}
 				// 卡住超过 14 秒 -> 自动降一档清晰度重试(含换台后卡死, 与首帧无关)
+				// 注: setQuality 内部会走 beginStreamSwitch() 通知原生盖黑幕
 				if (Date.now() - stallSince > 14000 && qualityDropLevel < DROP_ORDER.length) {
 					window.__WVT__.setQuality(DROP_ORDER[qualityDropLevel]);
 					qualityDropLevel++;
@@ -326,7 +365,7 @@
 		setTimeout(watchDetect, 5000);
 	}
 
-	log('injected, yangshipin immersive edition v2.4.0 (chromium)');
+	log('injected, yangshipin immersive edition v2.4.1 (chromium)');
 	injectImmersiveCss();
 	watchImmersive();
 	watchVideo();

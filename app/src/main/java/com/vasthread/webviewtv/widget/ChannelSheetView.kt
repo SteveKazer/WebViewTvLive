@@ -130,15 +130,15 @@ class ChannelSheetView @JvmOverloads constructor(
             letterSpacing = 0.08f
         })
 
-        tabAll = createTab("全部")
-        tabCctv = createTab("央视")
-        tabWeishi = createTab("卫视")
+        tabAll = createTab("全部", Channels.TAB_ALL)
+        tabCctv = createTab("央视", Channels.TAB_CCTV)
+        tabWeishi = createTab("卫视", Channels.TAB_WEISHI)
         tabsBox.addView(tabAll)
         tabsBox.addView(tabCctv)
         tabsBox.addView(tabWeishi)
 
         // 收藏固定底部
-        tabFavorite = createTab("★ 收藏")
+        tabFavorite = createTab("★ 收藏", Channels.TAB_FAVORITE)
         tabFavorite.setOnClickListener { setTab(Channels.TAB_FAVORITE) }
         rail.addView(tabFavorite)
 
@@ -233,7 +233,10 @@ class ChannelSheetView @JvmOverloads constructor(
 
     // ---------------- 内部实现 ----------------
 
-    private fun createTab(text: String): TextView {
+    /** 焦点态文字色: 焦点背景为琥珀黄, 文字用深黑保证可读 */
+    private fun focusTextColor() = 0xFF1A1A1A.toInt()
+
+    private fun createTab(text: String, tab: Int): TextView {
         return TextView(context).apply {
             this.text = text
             setTextColor(COLOR_SUB)
@@ -246,6 +249,12 @@ class ChannelSheetView @JvmOverloads constructor(
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(40f)
             ).apply { setMargins(ui.dp(6f), 0, ui.dp(6f), ui.dp(2f)) }
+            // 焦点态: 黄底黑字(修复焦点黄底看不见字)
+            setOnFocusChangeListener { v, hasFocus ->
+                v as TextView
+                v.setTextColor(if (hasFocus) focusTextColor()
+                    else if (currentTab == tab) COLOR_ACCENT else COLOR_SUB)
+            }
         }
     }
 
@@ -485,16 +494,11 @@ class ChannelSheetView @JvmOverloads constructor(
                 true
             }
             row.setOnFocusChangeListener { _, hasFocus ->
+                applyRowColors(hasFocus)
                 if (hasFocus) {
                     focusedChannel = channelName
-                    tvNumber.setTextColor(0xFF1A1A1A.toInt())
-                    tvName.setTextColor(0xFF1A1A1A.toInt())
-                    tvPlaying.setTextColor(0xFF1A1A1A.toInt())
                 } else {
                     if (focusedChannel == channelName) focusedChannel = ""
-                    tvNumber.setTextColor(COLOR_SUB)
-                    tvName.setTextColor(if (channelName == currentChannel) COLOR_ACCENT else COLOR_TEXT)
-                    tvPlaying.setTextColor(COLOR_ACCENT)
                 }
             }
         }
@@ -510,7 +514,7 @@ class ChannelSheetView @JvmOverloads constructor(
                 ivLogo.visibility = VISIBLE
                 tvBadge.visibility = GONE
             } else {
-                // 无图: 文字徽章兜底(央视深红/卫视深蓝)
+                // 无图: 文字徽章兑底(央视深红/卫视深蓝)
                 val badgeColor = if (channel.category == Channels.TAB_CCTV) 0xFF8E2222.toInt() else 0xFF1F3A5F.toInt()
                 tvBadge.text = channel.badge
                 tvBadge.background = rounded(badgeColor, ui.dp(4f) * 1.5f)
@@ -521,6 +525,30 @@ class ChannelSheetView @JvmOverloads constructor(
                 tvBadge.visibility = VISIBLE
                 ivLogo.visibility = GONE
             }
+            tvName.text = channel.name
+            val isCurrent = channel.name == currentChannel
+            tvPlaying.visibility = if (isCurrent) VISIBLE else GONE
+            applyRowColors(row.isFocused, isCurrent)
+        }
+
+        /**
+         * 统一应用行内文字颜色:
+         * 焦点态全部深黑(黄底可读); 非焦点按播放态着色。
+         * 单独抽出是因为 notifyDataSetChanged 重绑会覆盖焦点色(换台后必现 bug)。
+         */
+        private fun applyRowColors(focused: Boolean, isCurrent: Boolean = channelName == currentChannel) {
+            if (focused) {
+                tvNumber.setTextColor(focusTextColor())
+                tvName.setTextColor(focusTextColor())
+                tvPlaying.setTextColor(focusTextColor())
+                tvBadge.setTextColor(focusTextColor())
+            } else {
+                tvNumber.setTextColor(COLOR_SUB)
+                tvName.setTextColor(if (isCurrent) COLOR_ACCENT else COLOR_TEXT)
+                tvPlaying.setTextColor(COLOR_ACCENT)
+                tvBadge.setTextColor(Color.WHITE)
+            }
+        }
             tvName.text = channel.name
             val isCurrent = channel.name == currentChannel
             tvPlaying.visibility = if (isCurrent) VISIBLE else GONE

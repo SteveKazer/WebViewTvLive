@@ -40,4 +40,14 @@
 			android:indeterminateTint="#F2B33D" />
 	</LinearLayout>
 
+	<!-- 切流遮罩: 换台/切清晰度全程纯黑盖住 WebView,
+	     视频真正起播后淡出。用于遮蔽设备端 WebView 在视频
+	     表面渲染的原生占位图形(黑色大三角等, CSS 无法隐藏)。 -->
+	<View
+		android:id="@+id/switchCover"
+		android:layout_width="match_parent"
+		android:layout_height="match_parent"
+		android:background="#FF000000"
+		android:visibility="gone" />
+
 </merge>
