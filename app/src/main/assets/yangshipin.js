@@ -95,32 +95,37 @@
 
 	window.__WVT__ = {
 
-		// 换台: 映射点击页面频道按钮
-		switchChannel: function(name) {
-			var pill = findPill(name);
-			if (!pill) { console.error('[WVT] channel not found: ' + name); return false; }
-			var cur = q('.tvSelect');
-			if (cur && norm(cur.textContent) === norm(name)) { return true; } // 已是该频道
-			pill.click();
-			stallSince = Date.now(); // 换台后重置卡住计时
-			log('switchChannel -> ' + name);
-			return true;
-		},
+	// 换台: 映射点击页面频道按钮
+	switchChannel: function(name) {
+		var pill = findPill(name);
+		if (!pill) { console.error('[WVT] channel not found: ' + name); return false; }
+		var cur = q('.tvSelect');
+		if (cur && norm(cur.textContent) === norm(name)) { return true; } // 已是该频道
+		setVideoSurface(q('video'), true); // 动作瞬间即隐藏视频, 杜绝空窗期原生大播放图标
+		pill.click();
+		stallSince = Date.now(); // 换台后重置卡住计时
+		fsActive = false; // 换台会退出全屏接管, 重新请求
+		log('switchChannel -> ' + name);
+		return true;
+	},
 
-		// 设置清晰度: 隐藏态直接点击清晰度菜单项(已实测生效)
-		setQuality: function(label) {
-			var items = qa('.bei-list .item');
-			var target = norm(label);
-			for (var i = 0; i < items.length; i++) {
-				if (norm(items[i].textContent).indexOf(target) >= 0) {
-					if (!/active/.test(items[i].className)) { items[i].click(); }
-					log('setQuality -> ' + label);
-					return true;
+	// 设置清晰度: 隐藏态直接点击清晰度菜单项(已实测生效)
+	setQuality: function(label) {
+		var items = qa('.bei-list .item');
+		var target = norm(label);
+		for (var i = 0; i < items.length; i++) {
+			if (norm(items[i].textContent).indexOf(target) >= 0) {
+				if (!/active/.test(items[i].className)) {
+					setVideoSurface(q('video'), true); // 切流瞬间即隐藏, 杜绝空窗期原生大播放图标
+					items[i].click();
 				}
+				log('setQuality -> ' + label);
+				return true;
 			}
-			console.error('[WVT] quality not found: ' + label + ', items=' + items.length);
-			return false;
-		},
+		}
+		console.error('[WVT] quality not found: ' + label + ', items=' + items.length);
+		return false;
+	},
 
 		// 沉浸式样式是否已生效
 		isImmersive: function() {
@@ -229,6 +234,58 @@
 		setTimeout(watchVideoSurface, 200);
 	}
 
+	// 1.7 X5 原生视频全屏接管(电视修复, 参照原项目 WebViewTvLive 机制):
+	//     video.requestFullscreen() -> X5 onShowCustomView -> 视频进入原生接管层,
+	//     脱离 DOM 渲染路径, 电视上也能正常硬解播放(原 APK 在电视上正常即因于此)。
+	//     换台/切清晰度会退出接管, 起播后自动重新请求;
+	//     requestFullscreen 连续失败时降级到原生 F 键通道(原项目方案)。
+	var fsActive = false;
+	var fsFailCount = 0;
+	var lastFsTry = 0;
+	function nativeFullscreen() {
+		try { return !!(window.main && window.main.isVideoFullscreen && window.main.isVideoFullscreen()); }
+		catch (e) { return false; }
+	}
+	function requestVideoFullscreen() {
+		var v = q('video');
+		if (!v || v.paused) { return; }
+		if (document.fullscreenElement) { fsActive = true; return; }
+		try {
+			var p = v.requestFullscreen();
+			fsActive = (p === undefined); // X5 同步无返回值视为已请求
+			if (p && typeof p.then === 'function') {
+				p.then(function() { fsActive = true; fsFailCount = 0; log('video fullscreen active'); })
+				 .catch(function() { fsActive = false; fsFailCount++; });
+			} else { fsFailCount = 0; }
+		} catch (e) { fsActive = false; fsFailCount++; }
+	}
+	function watchFullscreen() {
+		try {
+			var v = q('video');
+			if (v && !v.paused) {
+				if (document.fullscreenElement || nativeFullscreen()) {
+					fsFailCount = 0;
+				} else if (Date.now() - lastFsTry > 3000) {
+					lastFsTry = Date.now();
+					if (fsFailCount >= 6) {
+						// requestFullscreen 连续失败 -> 原生 F 键通道(键码到达页面后再请求)
+						callNative('schemeEnterFullscreen');
+						fsFailCount = 3; // 降级通道重试几轮后再回 requestFullscreen
+					} else {
+						requestVideoFullscreen();
+				}
+				}
+			}
+		} catch (e) { /* ignore */ }
+		setTimeout(watchFullscreen, 2000);
+	}
+	// F 键(原生 dispatch)到达页面: 直接请求全屏接管
+	document.addEventListener('keydown', function(e) {
+		if ((e.key === 'f' || e.key === 'F') && !document.fullscreenElement) {
+			requestVideoFullscreen();
+		}
+	}, true);
+
 	// 2. 向原生上报播放状态; 首帧就绪后通知揭幕
 	var lastNotify = 0;
 	var firstFrameSent = false;
@@ -325,12 +382,13 @@
 		setTimeout(watchDetect, 5000);
 	}
 
-	log('injected, yangshipin immersive edition v2.3.2');
+	log('injected, yangshipin immersive edition v2.3.3');
 	injectImmersiveCss();
 	watchImmersive();
 	watchVideo();
 	watchStall();
 	watchVideoSurface();
+	watchFullscreen();
 	watchDetect();
 	callNative('notifyScriptReady');
 })();

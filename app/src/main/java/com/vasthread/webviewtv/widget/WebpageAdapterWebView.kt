@@ -9,6 +9,7 @@ import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.Log
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
 import android.webkit.JavascriptInterface
 import android.widget.FrameLayout
@@ -169,6 +170,7 @@ class WebpageAdapterWebView @JvmOverloads constructor(
             Log.i(TAG, "onShowCustomView")
             this.view = view
             this.callback = callback
+            fullscreenContainer.setBackgroundColor(Color.BLACK) // 接管时黑底(视频画面外留白区)
             fullscreenContainer.addView(view, generateLayoutParams())
             isInFullscreen = true
         }
@@ -176,6 +178,7 @@ class WebpageAdapterWebView @JvmOverloads constructor(
         override fun onHideCustomView() {
             Log.i(TAG, "onHideCustomView")
             fullscreenContainer.removeView(view)
+            fullscreenContainer.setBackgroundColor(Color.TRANSPARENT) // 恢复透明, 不挡 WebView
             callback?.onCustomViewHidden()
             view = null
             callback = null
@@ -312,6 +315,23 @@ class WebpageAdapterWebView @JvmOverloads constructor(
 
     @JavascriptInterface
     fun notifyVideoPlaying() {}
+
+    /** 查询当前是否处于 X5 原生视频全屏接管状态(供 JS 协同判断) */
+    @JavascriptInterface
+    fun isVideoFullscreen(): Boolean = isInFullscreen
+
+    /** JS 请求进入全屏接管(原项目方案): 向 WebView dispatch F 键,
+     *  键码到达页面 keydown -> JS 侧 requestFullscreen -> onShowCustomView */
+    @JavascriptInterface
+    fun schemeEnterFullscreen() {
+        if (isInFullscreen) return
+        Log.i(TAG, "schemeEnterFullscreen")
+        post {
+            val downTime = SystemClock.uptimeMillis()
+            dispatchKeyEvent(KeyEvent(downTime, downTime, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_F, 0))
+            dispatchKeyEvent(KeyEvent(downTime, SystemClock.uptimeMillis(), KeyEvent.ACTION_UP, KeyEvent.KEYCODE_F, 0))
+        }
+    }
 
     @JavascriptInterface
     fun setVideoSize(width: Int, height: Int) {
