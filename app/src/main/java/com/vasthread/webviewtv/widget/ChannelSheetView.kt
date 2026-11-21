@@ -57,11 +57,8 @@ class ChannelSheetView @JvmOverloads constructor(
 
     private val ui: UiScale = UiScale(context)
 
-    /** 台标位图缓存(assets 解码) */
+    /** 台标位图缓存(assets 解码, 已裁剪透明边) */
     private val logoCache = HashMap<String, Bitmap?>()
-
-    /** 台标明暗缓存: true=亮色台标(需暗底) */
-    private val logoLightCache = HashMap<String, Boolean>()
 
     private val rail: LinearLayout
     private val tabAll: TextView
@@ -306,32 +303,45 @@ class ChannelSheetView @JvmOverloads constructor(
 
     // ---------------- 台标加载 ----------------
 
+    /** 解码台标并裁剪透明边: 使各台标实际图案充满容器, 视觉尺寸统一 */
     private fun logoOf(asset: String): Bitmap? {
         if (logoCache.containsKey(asset)) return logoCache[asset]
         val bmp = runCatching {
             context.assets.open(asset).use { BitmapFactory.decodeStream(it) }
-        }.getOrNull()
+        }.getOrNull()?.let { trimTransparent(it) }
         logoCache[asset] = bmp
         return bmp
     }
 
-    /** 台标是否为亮色图案(白字类): 决定用暗底; 反之用白底 */
-    private fun isLogoLight(asset: String, bmp: Bitmap): Boolean {
-        logoLightCache[asset]?.let { return it }
-        var opaque = 0
-        var sum = 0L
-        for (x in 0 until bmp.width) {
-            for (y in 0 until bmp.height) {
-                val p = bmp.getPixel(x, y)
-                if (p ushr 24 > 128) {
-                    opaque++
-                    sum += ((p shr 16 and 0xFF) * 299L + (p shr 8 and 0xFF) * 587L + (p and 0xFF) * 114L) / 1000
-                }
-            }
+    /** 裁剪位图四周的透明边(保留非透明内容的最小矩形) */
+    private fun trimTransparent(src: Bitmap): Bitmap {
+        val w = src.width
+        val h = src.height
+        var top = 0; var bottom = h - 1
+        var left = 0; var right = w - 1
+        var foundTop = false; var foundBottom = false; var foundLeft = false; var foundRight = false
+        // 自上而下找第一个非透明行
+        outer@ for (y in 0 until h) {
+            for (x in 0 until w) { if (src.getPixel(x, y) ushr 24 > 8) { top = y; foundTop = true; break@outer } }
         }
-        val light = opaque > 0 && sum / opaque >= 128
-        logoLightCache[asset] = light
-        return light
+        if (!foundTop) return src // 全透明
+        // 自下而上
+        outer@ for (y in h - 1 downTo 0) {
+            for (x in 0 until w) { if (src.getPixel(x, y) ushr 24 > 8) { bottom = y; foundBottom = true; break@outer } }
+        }
+        // 自左而右
+        outer@ for (x in 0 until w) {
+            for (y in top..bottom) { if (src.getPixel(x, y) ushr 24 > 8) { left = x; foundLeft = true; break@outer } }
+        }
+        // 自右而左
+        outer@ for (x in w - 1 downTo 0) {
+            for (y in top..bottom) { if (src.getPixel(x, y) ushr 24 > 8) { right = x; foundRight = true; break@outer } }
+        }
+        if (!foundBottom || !foundLeft || !foundRight) return src
+        val nw = right - left + 1
+        val nh = bottom - top + 1
+        if (nw <= 0 || nh <= 0 || (nw == w && nh == h)) return src
+        return Bitmap.createBitmap(src, left, top, nw, nh)
     }
 
     // ---------------- 样式助手 ----------------
@@ -409,11 +419,11 @@ class ChannelSheetView @JvmOverloads constructor(
         }
         row.addView(number)
 
-        // 官方台标图(原图 72x36, 2:1); 底色自适应: 暗台标配白底/亮台标配暗底
+        // 官方台标图(已裁剪透明边, 统一白底)
         val logo = ImageView(context).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
-            setPadding(ui.dp(3f), ui.dp(3f), ui.dp(3f), ui.dp(3f))
-            layoutParams = LinearLayout.LayoutParams(ui.dp(50f), ui.dp(26f)).apply {
+            setPadding(ui.dp(2f), ui.dp(2f), ui.dp(2f), ui.dp(2f))
+            layoutParams = LinearLayout.LayoutParams(ui.dp(52f), ui.dp(26f)).apply {
                 leftMargin = ui.dp(6f)
             }
             tag = "logo"
@@ -494,10 +504,8 @@ class ChannelSheetView @JvmOverloads constructor(
             tvNumber.text = String.format("%03d", channel.number)
             val bmp = logoOf(channel.logoAsset)
             if (bmp != null) {
-                // 暗台标 -> 白底; 亮台标 -> 暗底(确保可见)
-                val light = isLogoLight(channel.logoAsset, bmp)
-                val chipColor = if (light) 0xFF22262E.toInt() else 0xF5FFFFFF.toInt()
-                ivLogo.background = rounded(chipColor, ui.dp(4f) * 1.5f)
+                // 统一白底台标位(用户要求: 所有台标统一白底)
+                ivLogo.background = rounded(0xF5FFFFFF.toInt(), ui.dp(4f) * 1.5f)
                 ivLogo.setImageBitmap(bmp)
                 ivLogo.visibility = VISIBLE
                 tvBadge.visibility = GONE

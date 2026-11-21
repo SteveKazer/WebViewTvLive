@@ -5,8 +5,8 @@ package com.vasthread.webviewtv.playlist
  * 名称必须与页面频道按钮文本一致(见 assets/yangshipin.js 的归一化匹配)。
  * 页面上的付费频道(限免/VIP)一律不收录。
  *
- * 台标: assets/logos/logo_<编号>.png, 取自央视频页面官方台标图。
- * 央视: 全部免费频道按页面顺序(数字键 1-27)。
+ * 台标: assets/logos/logo_<编号>.png, 取自央视频页面官方台标图(已逐张视觉核验)。
+ * 央视: CCTV1 到 CCTV8K 截止(共 21 个, 不含 CGTN 及外语频道), 按页面顺序, 数字键 1-21。
  * 卫视: 页面已有的 24 个 + 备用 14 个(陕西/吉林/云南等, 页面暂未提供,
  *       播放列表默认隐藏; 启动后 JS 检测页面频道, 检测到则自动显示)。
  *
@@ -36,12 +36,12 @@ object Channels {
     data class Channel(
         val name: String,      // 与页面 pill 完全一致的频道名
         val category: Int,     // 央视 / 卫视
-        val number: Int,       // 数字键选台编号(央视 1-27, 卫视 101-138)
+        val number: Int,       // 数字键选台编号(央视 1-21, 卫视 101-138)
         val logoAsset: String, // assets 台标图(空串=无图, 用文字徽章)
         val badge: String,     // 无台标图时的文字徽章(省份简称等)
     )
 
-    /** 央视: 页面全部免费频道, 按页面顺序 */
+    /** 央视: CCTV1 到 CCTV8K 截止(不含 CGTN 及外语频道) */
     private val cctvDefs = listOf(
         "CCTV1" to "央1", "CCTV2" to "央2", "CCTV3" to "央3", "CCTV4" to "央4",
         "CCTV5" to "央5", "CCTV5+" to "5+", "CCTV6" to "央6", "CCTV7" to "央7",
@@ -49,8 +49,6 @@ object Channels {
         "CCTV12" to "央12", "CCTV13" to "央13", "CCTV14" to "央14", "CCTV15" to "央15",
         "CCTV16-HD" to "16HD", "CCTV16(4K）" to "16 4K", "CCTV17" to "央17",
         "CCTV4K" to "4K", "CCTV8K" to "8K",
-        "CGTN" to "CGTN", "CGTN法语频道" to "法语", "CGTN俄语频道" to "俄语",
-        "CGTN阿拉伯语频道" to "阿拉伯", "CGTN西班牙语频道" to "西班牙", "CGTN外语纪录频道" to "纪录",
     )
 
     /**
@@ -85,7 +83,7 @@ object Channels {
         "西藏" to "西藏卫视",
     )
 
-    /** 央视频道(固定顺序, 编号 1-27) */
+    /** 央视频道(固定顺序, 编号 1-21) */
     val CCTV: List<Channel> by lazy {
         cctvDefs.mapIndexed { i, (name, badge) ->
             Channel(name, TAB_CCTV, i + 1, "logos/logo_${i + 1}.png", badge)

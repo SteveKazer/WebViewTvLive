@@ -19,9 +19,9 @@
 //
 // 暂停盖层(实测定位):
 //   X5 内核在视频 paused 时会在视频表面渲染原生大播放图标,
-//   无法用 CSS 隐藏(不在 DOM)。方案: 在 .c-container 内插入黑底盖层(z:50,
-//   位于视频之上、页面 loading 层[.con.poster z:99]之下), 视频暂停时显示,
-//   恢复播放时隐藏 —— 大图标被盖住, "全力加载中"提示仍可见。
+//   无法用 CSS 隐藏(不在 DOM)。方案: 视频 paused/无数据时直接
+//   visibility:hidden 隐藏 video 元素(视频层整体不渲染, 原生图标
+//   随之消失), 恢复播放即恢复显示; 另保留黑底 DOM 盖层(z:50)双保险。
 //
 // 频道检测:
 //   每帧扫描页面频道 pill, 集合变化时上报原生 notifyChannels(json),
@@ -175,7 +175,13 @@
 		setTimeout(watchImmersive, 2000);
 	}
 
-	// 1.5 暂停盖层: 盖住 X5 原生大播放图标(位于视频表面), 不挡页面 loading 层
+	// 1.5 视频隐藏器: X5 在视频 paused/无数据时会在视频表面渲染原生大播放图标,
+	//     不在 DOM 内, CSS 与 DOM 盖层均无法遮盖。方案: 直接把 video 元素
+	//     visibility:hidden —— 视频层整体不渲染, 原生图标随之消失;
+	//     事件驱动(pause/emptied 立即隐藏, playing 立即恢复), 轮询兑底。
+	//     页面"全力加载中"提示层(z:99)位于视频之上, 不受影响。
+	var surfaceEmptySince = 0;
+	var boundVideo = null;
 	function ensurePauseCover() {
 		var c = document.getElementById('wvt-pause-cover');
 		if (c) { return c; }
@@ -188,18 +194,39 @@
 		log('pause cover installed');
 		return c;
 	}
-	function watchPauseCover() {
+	function setVideoSurface(v, hide) {
 		try {
+			var target = hide ? 'hidden' : '';
+			if (v.style.visibility !== target) { v.style.visibility = target; }
 			var cover = ensurePauseCover();
+			if (cover) { cover.style.display = hide ? 'block' : 'none'; }
+		} catch (e) { /* ignore */ }
+	}
+	function bindVideoEvents(v) {
+		if (v === boundVideo) { return; }
+		boundVideo = v;
+		try {
+			v.addEventListener('pause', function() { setVideoSurface(v, true); });
+			v.addEventListener('emptied', function() { setVideoSurface(v, true); });
+			v.addEventListener('playing', function() { setVideoSurface(v, false); });
+			v.addEventListener('canplay', function() { if (!v.paused) { setVideoSurface(v, false); } });
+		} catch (e) { /* ignore */ }
+	}
+	function watchVideoSurface() {
+		try {
 			var v = q('video');
-			if (cover && v) {
-				var show = v.paused && !v.ended;
-				if ((cover.style.display === 'block') !== show) {
-					cover.style.display = show ? 'block' : 'none';
-				}
+			if (v) {
+				bindVideoEvents(v);
+				var hide = v.paused && !v.ended;
+				if (!hide && v.readyState <= 1) {
+					// 持续无数据(切清晰度/换台后)超过 600ms 也隐藏
+					if (surfaceEmptySince === 0) { surfaceEmptySince = Date.now(); }
+					else if (Date.now() - surfaceEmptySince > 600) { hide = true; }
+				} else { surfaceEmptySince = 0; }
+				setVideoSurface(v, hide);
 			}
 		} catch (e) { /* ignore */ }
-		setTimeout(watchPauseCover, 250);
+		setTimeout(watchVideoSurface, 200);
 	}
 
 	// 2. 向原生上报播放状态; 首帧就绪后通知揭幕
@@ -298,12 +325,12 @@
 		setTimeout(watchDetect, 5000);
 	}
 
-	log('injected, yangshipin immersive edition v2.3.1');
+	log('injected, yangshipin immersive edition v2.3.2');
 	injectImmersiveCss();
 	watchImmersive();
 	watchVideo();
 	watchStall();
-	watchPauseCover();
+	watchVideoSurface();
 	watchDetect();
 	callNative('notifyScriptReady');
 })();
