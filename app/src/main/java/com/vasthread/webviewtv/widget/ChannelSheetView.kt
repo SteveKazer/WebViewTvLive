@@ -376,7 +376,7 @@ class ChannelSheetView @JvmOverloads constructor(
             gravity = Gravity.CENTER
             setTextColor(COLOR_SUB)
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ui.sp(10f))
-            background = rounded(COLOR_CHIP, ui.dp(4f))
+            background = rounded(COLOR_CHIP, ui.dp(4f) * 1.5f)
             layoutParams = LinearLayout.LayoutParams(ui.dp(34f), ui.dp(20f))
             tag = "number"
         }
