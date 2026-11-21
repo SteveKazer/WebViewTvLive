@@ -60,6 +60,9 @@ class ChannelSheetView @JvmOverloads constructor(
     /** 台标位图缓存(assets 解码) */
     private val logoCache = HashMap<String, Bitmap?>()
 
+    /** 台标明暗缓存: true=亮色台标(需暗底) */
+    private val logoLightCache = HashMap<String, Boolean>()
+
     private val rail: LinearLayout
     private val tabAll: TextView
     private val tabCctv: TextView
@@ -201,6 +204,11 @@ class ChannelSheetView @JvmOverloads constructor(
         adapter.notifyDataSetChanged()
     }
 
+    /** 频道可用性变化后刷新(检测到新频道时调用) */
+    fun refresh() {
+        applyTab()
+    }
+
     fun setFavorites(favorites: Set<String>, province: String?) {
         this.favorites = favorites
         this.province = province
@@ -257,15 +265,15 @@ class ChannelSheetView @JvmOverloads constructor(
         tabWeishi.setTextColor(if (currentTab == Channels.TAB_WEISHI) COLOR_ACCENT else COLOR_SUB)
         tabFavorite.setTextColor(if (currentTab == Channels.TAB_FAVORITE) COLOR_ACCENT else COLOR_SUB)
 
-        tabAll.text = "全部 ${Channels.ALL.size}"
-        tabCctv.text = "央视 ${Channels.CCTV.size}"
-        tabWeishi.text = "卫视 ${Channels.WEISHI.size}"
+        tabAll.text = "全部 ${Channels.allOrdered(province).size}"
+        tabCctv.text = "央视 ${Channels.cctvVisible().size}"
+        tabWeishi.text = "卫视 ${Channels.weishiOrdered(province).size}"
         tabFavorite.text = "★ 收藏 ${favorites.size}"
 
         val data = channelsOf(currentTab)
         listTitle.text = when (currentTab) {
-            Channels.TAB_CCTV -> "央视频道 · 数字键 1-27"
-            Channels.TAB_WEISHI -> "卫视频道 · 本省优先 · 数字键 101-124"
+            Channels.TAB_CCTV -> "央视频道 · 数字键选台"
+            Channels.TAB_WEISHI -> "卫视频道 · 本省优先 · 数字键选台"
             Channels.TAB_FAVORITE -> "我的收藏 · 上下换台仅在本列表内"
             else -> "全部频道 · 数字键直接选台"
         }
@@ -305,6 +313,25 @@ class ChannelSheetView @JvmOverloads constructor(
         }.getOrNull()
         logoCache[asset] = bmp
         return bmp
+    }
+
+    /** 台标是否为亮色图案(白字类): 决定用暗底; 反之用白底 */
+    private fun isLogoLight(asset: String, bmp: Bitmap): Boolean {
+        logoLightCache[asset]?.let { return it }
+        var opaque = 0
+        var sum = 0L
+        for (x in 0 until bmp.width) {
+            for (y in 0 until bmp.height) {
+                val p = bmp.getPixel(x, y)
+                if (p ushr 24 > 128) {
+                    opaque++
+                    sum += ((p shr 16 and 0xFF) * 299L + (p shr 8 and 0xFF) * 587L + (p and 0xFF) * 114L) / 1000
+                }
+            }
+        }
+        val light = opaque > 0 && sum / opaque >= 128
+        logoLightCache[asset] = light
+        return light
     }
 
     // ---------------- 样式助手 ----------------
@@ -382,15 +409,28 @@ class ChannelSheetView @JvmOverloads constructor(
         }
         row.addView(number)
 
-        // 官方台标图(原图 72x36, 2:1)
+        // 官方台标图(原图 72x36, 2:1); 底色自适应: 暗台标配白底/亮台标配暗底
         val logo = ImageView(context).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
-            layoutParams = LinearLayout.LayoutParams(ui.dp(46f), ui.dp(22f)).apply {
+            setPadding(ui.dp(3f), ui.dp(3f), ui.dp(3f), ui.dp(3f))
+            layoutParams = LinearLayout.LayoutParams(ui.dp(50f), ui.dp(26f)).apply {
                 leftMargin = ui.dp(6f)
             }
             tag = "logo"
         }
         row.addView(logo)
+
+        // 无台标图时的文字徽章兜底(备用频道等)
+        val badge = TextView(context).apply {
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ui.sp(10f))
+            layoutParams = LinearLayout.LayoutParams(ui.dp(38f), ui.dp(22f)).apply {
+                leftMargin = ui.dp(8f)
+            }
+            tag = "badge"
+        }
+        row.addView(badge)
 
         val name = TextView(context).apply {
             setTextColor(COLOR_TEXT)
@@ -421,6 +461,7 @@ class ChannelSheetView @JvmOverloads constructor(
 
         private val tvNumber: TextView = row.findViewWithTag("number")
         private val ivLogo: ImageView = row.findViewWithTag("logo")
+        private val tvBadge: TextView = row.findViewWithTag("badge")
         private val tvName: TextView = row.findViewWithTag("name")
         private val tvPlaying: TextView = row.findViewWithTag("playing")
         private var channelName: String = ""
@@ -451,7 +492,27 @@ class ChannelSheetView @JvmOverloads constructor(
         fun bind(channel: Channel) {
             channelName = channel.name
             tvNumber.text = String.format("%03d", channel.number)
-            ivLogo.setImageBitmap(logoOf(channel.logoAsset))
+            val bmp = logoOf(channel.logoAsset)
+            if (bmp != null) {
+                // 暗台标 -> 白底; 亮台标 -> 暗底(确保可见)
+                val light = isLogoLight(channel.logoAsset, bmp)
+                val chipColor = if (light) 0xFF22262E.toInt() else 0xF5FFFFFF.toInt()
+                ivLogo.background = rounded(chipColor, ui.dp(4f) * 1.5f)
+                ivLogo.setImageBitmap(bmp)
+                ivLogo.visibility = VISIBLE
+                tvBadge.visibility = GONE
+            } else {
+                // 无图: 文字徽章兜底(央视深红/卫视深蓝)
+                val badgeColor = if (channel.category == Channels.TAB_CCTV) 0xFF8E2222.toInt() else 0xFF1F3A5F.toInt()
+                tvBadge.text = channel.badge
+                tvBadge.background = rounded(badgeColor, ui.dp(4f) * 1.5f)
+                tvBadge.setTextSize(
+                    android.util.TypedValue.COMPLEX_UNIT_PX,
+                    (if (channel.badge.length > 2) ui.sp(9f) else ui.sp(10f))
+                )
+                tvBadge.visibility = VISIBLE
+                ivLogo.visibility = GONE
+            }
             tvName.text = channel.name
             val isCurrent = channel.name == currentChannel
             tvPlaying.visibility = if (isCurrent) VISIBLE else GONE

@@ -11,15 +11,25 @@ android {
         applicationId = "com.stevekazer.yangshiplive"
         minSdk = 21
         targetSdk = 34
-        versionCode = 23
-        versionName = "2.3.0-yangshipin"
+        versionCode = 24
+        versionName = "2.3.1-yangshipin"
+    }
+
+    signingConfigs {
+        // 固定发布签名: 保证 CI 产物签名一致, 支持"覆盖安装"升级
+        create("release") {
+            storeFile = file("keystore/release.keystore")
+            storePassword = "YspLive2026kq7X"
+            keyAlias = "yangshipin"
+            keyPassword = "YspLive2026kq7X"
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            // 复用自动生成的 debug 签名, 保证 CI 产出的 APK 可直接安装
-            signingConfig = signingConfigs.getByName("debug")
+            // 固定签名(覆盖安装), 兼容此前已安装的 debug 签名版本不存在——首次安装新签名需卸载旧版
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

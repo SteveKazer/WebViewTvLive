@@ -17,6 +17,16 @@
 //   当前频道:  .tvSelect
 //   清晰度:    .bei-list .item (蓝光/超清/高清, 隐藏态可直接点击)
 //
+// 暂停盖层(实测定位):
+//   X5 内核在视频 paused 时会在视频表面渲染原生大播放图标,
+//   无法用 CSS 隐藏(不在 DOM)。方案: 在 .c-container 内插入黑底盖层(z:50,
+//   位于视频之上、页面 loading 层[.con.poster z:99]之下), 视频暂停时显示,
+//   恢复播放时隐藏 —— 大图标被盖住, "全力加载中"提示仍可见。
+//
+// 频道检测:
+//   每帧扫描页面频道 pill, 集合变化时上报原生 notifyChannels(json),
+//   原生据此决定库中哪些频道可见(备用卫视检测到即显示)。
+//
 // 播放看门狗(电视卡死自愈, 实测页面 loading 层为 .loading.black-bg):
 //   - 视频存在但 paused: 每 2 秒强制 video.play()
 //   - 持续卡住超过 ~14 秒: 自动降一档清晰度(蓝光->超清->高清)重试
@@ -165,6 +175,33 @@
 		setTimeout(watchImmersive, 2000);
 	}
 
+	// 1.5 暂停盖层: 盖住 X5 原生大播放图标(位于视频表面), 不挡页面 loading 层
+	function ensurePauseCover() {
+		var c = document.getElementById('wvt-pause-cover');
+		if (c) { return c; }
+		var container = q('.c-container');
+		if (!container) { return null; }
+		c = document.createElement('div');
+		c.id = 'wvt-pause-cover';
+		c.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;background:#000;z-index:50;display:none;pointer-events:none;';
+		container.appendChild(c);
+		log('pause cover installed');
+		return c;
+	}
+	function watchPauseCover() {
+		try {
+			var cover = ensurePauseCover();
+			var v = q('video');
+			if (cover && v) {
+				var show = v.paused && !v.ended;
+				if ((cover.style.display === 'block') !== show) {
+					cover.style.display = show ? 'block' : 'none';
+				}
+			}
+		} catch (e) { /* ignore */ }
+		setTimeout(watchPauseCover, 250);
+	}
+
 	// 2. 向原生上报播放状态; 首帧就绪后通知揭幕
 	var lastNotify = 0;
 	var firstFrameSent = false;
@@ -238,10 +275,35 @@
 		setTimeout(watchStall, 2000);
 	}
 
-	log('injected, yangshipin immersive edition v2.3');
+	// 4. 频道检测: 页面频道集合变化时上报原生(备用卫视检测到即显示)
+	var lastPillSig = '';
+	function watchDetect() {
+		try {
+			var pills = qa('.tv-main-con-r-list-left > div');
+			if (pills.length) {
+				var names = [];
+				for (var i = 0; i < pills.length; i++) {
+					names.push((pills[i].textContent || '').replace(/\(限免\)|\(VIP\)|（限免）|（VIP）/g, '').replace(/\s+/g, ''));
+				}
+				var sig = names.join('|');
+				if (sig !== lastPillSig && window.main && typeof window.main.notifyChannels === 'function') {
+					lastPillSig = sig; // 只在可上报时记录, 原生桥未就绪则下次重试
+					try {
+						window.main.notifyChannels(JSON.stringify(names));
+						log('channels detected: ' + names.length);
+					} catch (e) { lastPillSig = ''; } // 失败重置, 下轮重试
+				}
+			}
+		} catch (e) { /* ignore */ }
+		setTimeout(watchDetect, 5000);
+	}
+
+	log('injected, yangshipin immersive edition v2.3.1');
 	injectImmersiveCss();
 	watchImmersive();
 	watchVideo();
 	watchStall();
+	watchPauseCover();
+	watchDetect();
 	callNative('notifyScriptReady');
 })();

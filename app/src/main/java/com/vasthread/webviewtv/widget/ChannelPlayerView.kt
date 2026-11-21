@@ -62,6 +62,9 @@ class ChannelPlayerView @JvmOverloads constructor(
     /** 页面加载完成 */
     var onPageReady: (() -> Unit)? = null
 
+    /** 页面频道检测上报(JSON 数组字符串) */
+    var onChannelsDetected: ((String) -> Unit)? = null
+
     /** 首帧就绪(视频起播且沉浸式样式已应用) */
     var onFirstFrame: (() -> Unit)? = null
 
@@ -123,6 +126,7 @@ class ChannelPlayerView @JvmOverloads constructor(
             this.fullscreenContainer = this@ChannelPlayerView.fullscreenContainer
             onScriptReady = { this@ChannelPlayerView.onScriptReady?.invoke() }
             onPageReady = { this@ChannelPlayerView.onPageReady?.invoke() }
+            onChannelsDetected = { json -> this@ChannelPlayerView.onChannelsDetected?.invoke(json) }
             onFirstFrame = {
                 this@ChannelPlayerView.firstFrame = true
                 hideLoading()

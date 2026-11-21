@@ -90,6 +90,9 @@ class WebpageAdapterWebView @JvmOverloads constructor(
     /** 页面加载完成(每次进度 100) */
     var onPageReady: (() -> Unit)? = null
 
+    /** 页面频道检测上报(注入脚本扫描页面频道 pill 后回调) */
+    var onChannelsDetected: ((String) -> Unit)? = null
+
     fun interface JsCallback { fun onResult(result: String) }
 
     private val client = object : WebViewClient() {
@@ -299,6 +302,12 @@ class WebpageAdapterWebView @JvmOverloads constructor(
     @JavascriptInterface
     fun notifyFirstFrame() {
         post { onFirstFrame?.invoke() }
+    }
+
+    /** 页面频道检测上报(JSON 数组字符串) */
+    @JavascriptInterface
+    fun notifyChannels(json: String) {
+        post { onChannelsDetected?.invoke(json) }
     }
 
     @JavascriptInterface

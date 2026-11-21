@@ -3,6 +3,7 @@ package com.vasthread.webviewtv.activity
 import android.annotation.SuppressLint
 import android.os.Bundle
 import android.util.Log
+import org.json.JSONArray
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -147,6 +148,15 @@ class MainActivity : AppCompatActivity() {
 			if (!scriptToastShown) {
 				scriptToastShown = true
 				toast("已连接央视频")
+			}
+		}
+		playerView.onChannelsDetected = { json ->
+			// 页面频道检测: 更新库中频道可见性(备用卫视检测到即显示)
+			runCatching {
+				val arr = JSONArray(json)
+				val names = (0 until arr.length()).map { arr.optString(it) }
+				Channels.setDetected(names)
+				channelSheet.refresh()
 			}
 		}
 		playerView.onFirstFrame = {
