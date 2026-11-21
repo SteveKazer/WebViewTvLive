@@ -1,7 +1,7 @@
 // =====================================================================
 // 央视频TV 注入脚本 (注入到 https://www.yangshipin.cn/tv/home)
 // ---------------------------------------------------------------------
-// 核心思想: 只打开一个标签页, 沉浸式播放。(v2.4.1 系统 WebView/Chromium 版)
+// 核心思想: 只打开一个标签页, 沉浸式播放。(v2.4.2 系统 WebView/Chromium 版)
 //
 // 沉浸式方案(已实测):
 //   页面自身的"全屏"按钮在部分设备上不可靠, 因此改为注入 CSS:
@@ -33,8 +33,9 @@
 //
 // 播放看门狗(播放卡死自愈, 实测页面 loading 层为 .loading.black-bg):
 //   - 视频存在但 paused: 持续超 4 秒强制 video.play()
-//   - 持续卡住超过 ~14 秒: 自动降一档清晰度(蓝光->超清->高清)重试
 //   - 视频已在播但页面 loading 层仍卡住 >2 秒: 强制隐藏该层
+//   注: 不自动降清晰度(v2.4.2 起按用户要求移除画质兜底,
+//   卡顿时由用户自行切换清晰度)。
 //
 // 对原生暴露 window.main (JavascriptInterface)
 // =====================================================================
@@ -292,12 +293,10 @@
 
 	// 3. 播放看门狗: 视频卡住(电视上页面 loading 永不消失)时自愈
 	//    - paused -> 每 2 秒强制 play()
-	//    - 卡住超过 14 秒 -> 自动降一档清晰度重试(最多降两档)
 	//    - 已播放但页面 loading 层卡住 >2 秒 -> 隐藏该层
+	//    (不自动降清晰度: v2.4.2 起按用户要求移除画质兜底)
 	var stallSince = Date.now();      // 本次卡住开始时间
-	var qualityDropLevel = 0;         // 本会话已自动降档次数(0=未降)
 	var playingNotified = 0;          // 播放中且 loading 可见的采样起点(0=未见)
-	var DROP_ORDER = ['超清', '高清'];  // 蓝光起依次降级
 
 	function watchStall() {
 		try {
@@ -306,19 +305,11 @@
 			var loadingVisible = !!(loading && getComputedStyle(loading).display !== 'none');
 
 			if (v && v.paused) {
-				// 视频暂停: 强制恢复播放(X5 下换清晰度/加载失败可能停在 paused)
+				// 视频暂停: 强制恢复播放(换清晰度/加载失败可能停在 paused)
 				if (Date.now() - stallSince > 4000) { // 只在卡住较久后干预, 避免影响页面自身逻辑
 					var p = v.play();
 					if (p && typeof p.catch === 'function') { p.catch(function() { /* autoplay 被拒, 等下次 */ }); }
 					log('stall watchdog: force play()');
-				}
-				// 卡住超过 14 秒 -> 自动降一档清晰度重试(含换台后卡死, 与首帧无关)
-				// 注: setQuality 内部会走 beginStreamSwitch() 通知原生盖黑幕
-				if (Date.now() - stallSince > 14000 && qualityDropLevel < DROP_ORDER.length) {
-					window.__WVT__.setQuality(DROP_ORDER[qualityDropLevel]);
-					qualityDropLevel++;
-					stallSince = Date.now(); // 给新清晰度一个完整的观察窗口
-					log('stall watchdog: drop quality -> ' + DROP_ORDER[qualityDropLevel - 1]);
 				}
 			}
 
@@ -365,7 +356,7 @@
 		setTimeout(watchDetect, 5000);
 	}
 
-	log('injected, yangshipin immersive edition v2.4.1 (chromium)');
+	log('injected, yangshipin immersive edition v2.4.2 (chromium)');
 	injectImmersiveCss();
 	watchImmersive();
 	watchVideo();

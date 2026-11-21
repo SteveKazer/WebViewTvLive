@@ -29,6 +29,12 @@
 			android:layout_height="match_parent"
 			android:visibility="gone" />
 
+		<com.vasthread.webviewtv.widget.SettingsSheetView
+			android:id="@+id/settingsSheet"
+			android:layout_width="match_parent"
+			android:layout_height="match_parent"
+			android:visibility="gone" />
+
 	</com.vasthread.webviewtv.widget.UiLayout>
 
 </FrameLayout>

@@ -64,6 +64,33 @@ class UpdateManager(private val activity: Activity) {
         }.start()
     }
 
+    /** 设置页"立即检查更新": 有新版本弹窗; 无新版本/失败给 Toast 反馈 */
+    fun checkManual() {
+        Thread {
+            try {
+                val info = fetchLatest()
+                when {
+                    info == null -> activity.runOnUiThread {
+                        Toast.makeText(activity, "检查更新失败，请稍后重试", Toast.LENGTH_SHORT).show()
+                    }
+                    isNewer(info.version) -> activity.runOnUiThread { promptUpdate(info) }
+                    else -> activity.runOnUiThread {
+                        Toast.makeText(
+                            activity,
+                            "已是最新版本 ${BuildConfig.VERSION_NAME.substringBefore('-')}",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "manual check failed: ${e.message}")
+                activity.runOnUiThread {
+                    Toast.makeText(activity, "检查更新失败，请稍后重试", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }.start()
+    }
+
     private fun fetchLatest(): ReleaseInfo? {
         val conn = URL(API_LATEST).openConnection() as HttpURLConnection
         conn.connectTimeout = 8000

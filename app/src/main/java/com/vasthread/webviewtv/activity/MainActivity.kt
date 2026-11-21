@@ -19,6 +19,7 @@ import com.vasthread.webviewtv.update.UpdateManager
 import com.vasthread.webviewtv.widget.ChannelPlayerView
 import com.vasthread.webviewtv.widget.ChannelSheetView
 import com.vasthread.webviewtv.widget.QualitySheetView
+import com.vasthread.webviewtv.widget.SettingsSheetView
 import com.vasthread.webviewtv.widget.UiLayout
 import java.net.HttpURLConnection
 import java.net.URL
@@ -32,12 +33,14 @@ class MainActivity : AppCompatActivity() {
 		private const val KEY_ACTIVE_TAB = "active_tab"
 		private const val KEY_FAVORITES = "favorites"
 		private const val KEY_PROVINCE = "province"
+		private const val KEY_INVERT_SWITCH = "invert_switch"
+		private const val KEY_AUTO_UPDATE = "auto_update"
 		private const val SHEET_TIMEOUT = 8000L
 		private const val EXIT_CONFIRM_WINDOW = 2000L
 		private const val DIGIT_INPUT_TIMEOUT = 1200L
 		private const val LONG_PRESS_OK_DELAY = 650L
 
-		private enum class UiMode { STANDARD, CHANNELS, QUALITY }
+		private enum class UiMode { STANDARD, CHANNELS, QUALITY, SETTINGS }
 
 		private val OPERATION_KEYS = arrayOf(
 			KeyEvent.KEYCODE_DPAD_UP,
@@ -56,12 +59,15 @@ class MainActivity : AppCompatActivity() {
 	private lateinit var uiLayout: UiLayout
 	private lateinit var channelSheet: ChannelSheetView
 	private lateinit var qualitySheet: QualitySheetView
+	private lateinit var settingsSheet: SettingsSheetView
 	private lateinit var updateManager: UpdateManager
 
 	private var lastChannel = Channels.DEFAULT_CHANNEL
 	private var lastQuality = Channels.DEFAULT_QUALITY
 	private var activeTab = Channels.TAB_ALL
 	private var province: String? = null
+	private var invertSwitch = false
+	private var autoUpdate = true
 	private var scriptToastShown = false
 	private var lastBackAt = 0L
 
@@ -87,13 +93,21 @@ class MainActivity : AppCompatActivity() {
 				}
 				UiMode.QUALITY -> {
 					channelSheet.visibility = View.GONE
+					settingsSheet.visibility = View.GONE
 					qualitySheet.open(lastQuality)
+					repostCloseAction()
+				}
+				UiMode.SETTINGS -> {
+					channelSheet.visibility = View.GONE
+					qualitySheet.visibility = View.GONE
+					settingsSheet.open(invertSwitch, autoUpdate)
 					repostCloseAction()
 				}
 				UiMode.STANDARD -> {
 					mainLayout.removeCallbacks(closeSheetAction)
 					channelSheet.visibility = View.GONE
 					qualitySheet.visibility = View.GONE
+					settingsSheet.visibility = View.GONE
 					playerView.requestFocus()
 				}
 			}
@@ -118,6 +132,7 @@ class MainActivity : AppCompatActivity() {
 		playerView = findViewById(R.id.player)
 		channelSheet = findViewById(R.id.channelSheet)
 		qualitySheet = findViewById(R.id.qualitySheet)
+		settingsSheet = findViewById(R.id.settingsSheet)
 
 		window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
 			View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
@@ -136,10 +151,10 @@ class MainActivity : AppCompatActivity() {
 			if (uiMode == UiMode.STANDARD) uiMode = UiMode.QUALITY
 		}
 		playerView.swipeNextCallback = {
-			if (uiMode == UiMode.STANDARD) switchChannelByStep(forward = true)
+			if (uiMode == UiMode.STANDARD) switchChannelByStep(forward = !invertSwitch)
 		}
 		playerView.swipePrevCallback = {
-			if (uiMode == UiMode.STANDARD) switchChannelByStep(forward = false)
+			if (uiMode == UiMode.STANDARD) switchChannelByStep(forward = invertSwitch)
 		}
 		playerView.onPageReady = {
 			restoreIfNeeded()
@@ -160,8 +175,8 @@ class MainActivity : AppCompatActivity() {
 			}
 		}
 		playerView.onFirstFrame = {
-			// 首帧就绪后延迟检查更新, 不打断观赏
-			mainLayout.postDelayed({ updateManager.checkAndPrompt() }, 5000)
+			// 首帧就绪后延迟检查更新, 不打断观赏(需开启自动更新)
+			mainLayout.postDelayed({ if (autoUpdate) updateManager.checkAndPrompt() }, 5000)
 		}
 		channelSheet.callback = object : ChannelSheetView.Callback {
 			override fun onChannelSelected(name: String, tab: Int) {
@@ -175,21 +190,41 @@ class MainActivity : AppCompatActivity() {
 			}
 		}
 		channelSheet.onDismissCallback = { uiMode = UiMode.STANDARD }
-	qualitySheet.callback = object : QualitySheetView.Callback {
-		override fun onQualitySelected(label: String) {
-			lastQuality = label
-			saveState()
-			playerView.setQuality(label)
-			channelSheet.setCurrent(lastChannel)
-			toast("已切换为 $label")
-			uiMode = UiMode.STANDARD
-		}
+		qualitySheet.callback = object : QualitySheetView.Callback {
+			override fun onQualitySelected(label: String) {
+				lastQuality = label
+				saveState()
+				playerView.setQuality(label)
+				channelSheet.setCurrent(lastChannel)
+				toast("已切换为 $label")
+				uiMode = UiMode.STANDARD
+			}
 
-		override fun onSettingsClick() {
-			toast("设置功能即将上线")
+			override fun onSettingsClick() {
+				uiMode = UiMode.SETTINGS
+			}
 		}
-	}
 		qualitySheet.onDismissCallback = { uiMode = UiMode.STANDARD }
+
+		// ---- 设置弹窗 ----
+		settingsSheet.callback = object : SettingsSheetView.Callback {
+			override fun onInvertSwitchChanged(invert: Boolean) {
+				invertSwitch = invert
+				preference.edit().putBoolean(KEY_INVERT_SWITCH, invert).apply()
+				toast(if (invert) "上下键已反转" else "上下键已恢复正常")
+			}
+
+			override fun onAutoUpdateChanged(enabled: Boolean) {
+				autoUpdate = enabled
+				preference.edit().putBoolean(KEY_AUTO_UPDATE, enabled).apply()
+				toast(if (enabled) "已开启自动更新" else "已关闭自动更新")
+			}
+
+			override fun onCheckUpdateClick() {
+				updateManager.checkManual()
+			}
+		}
+		settingsSheet.onDismissCallback = { uiMode = UiMode.STANDARD }
 	}
 
 	private fun startPlayerIfNeeded() {
@@ -226,6 +261,8 @@ class MainActivity : AppCompatActivity() {
 			activeTab = preference.getInt(KEY_ACTIVE_TAB, Channels.TAB_ALL)
 			if (activeTab == Channels.TAB_FAVORITE && favorites().isEmpty()) activeTab = Channels.TAB_ALL
 			province = preference.getString(KEY_PROVINCE, null)
+			invertSwitch = preference.getBoolean(KEY_INVERT_SWITCH, false)
+			autoUpdate = preference.getBoolean(KEY_AUTO_UPDATE, true)
 		}
 	}
 
@@ -415,6 +452,15 @@ class MainActivity : AppCompatActivity() {
 			return super.dispatchKeyEvent(event)
 		}
 
+		// 设置弹窗打开: BACK 关闭, 其余交由焦点导航(上下键移动行, OK 切换开关)
+		if (uiMode == UiMode.SETTINGS && settingsSheet.visibility == View.VISIBLE) {
+			if (keyCode == KeyEvent.KEYCODE_BACK && isActionUp) {
+				settingsSheet.dismiss()
+				return true
+			}
+			return super.dispatchKeyEvent(event)
+		}
+
 		// 播放态(遮罩下)的按键
 		when {
 			keyCode == KeyEvent.KEYCODE_BACK && isActionUp -> {
@@ -435,13 +481,13 @@ class MainActivity : AppCompatActivity() {
 				uiMode = UiMode.QUALITY
 				return true
 			}
-			// 下键 = 往下播放(下一个), 上键 = 往上播放(上一个)
+			// 下键 = 往下播放(下一个), 上键 = 往上播放(上一个); 可在设置中反转
 			isActionUp && keyCode == KeyEvent.KEYCODE_DPAD_DOWN -> {
-				switchChannelByStep(forward = true)
+				switchChannelByStep(forward = !invertSwitch)
 				return true
 			}
 			isActionUp && keyCode == KeyEvent.KEYCODE_DPAD_UP -> {
-				switchChannelByStep(forward = false)
+				switchChannelByStep(forward = invertSwitch)
 				return true
 			}
 		}
@@ -450,7 +496,7 @@ class MainActivity : AppCompatActivity() {
 
 	private fun repostCloseAction() {
 		mainLayout.removeCallbacks(closeSheetAction)
-		if (uiMode == UiMode.CHANNELS || uiMode == UiMode.QUALITY) {
+		if (uiMode == UiMode.CHANNELS || uiMode == UiMode.QUALITY || uiMode == UiMode.SETTINGS) {
 			mainLayout.postDelayed(closeSheetAction, SHEET_TIMEOUT)
 		}
 	}

@@ -130,7 +130,7 @@ class QualitySheetView @JvmOverloads constructor(
             gravity = Gravity.CENTER
         }
         val settingsHint = TextView(context).apply {
-            text = "敬请期待"
+            text = "按键与更新设置"
             setTextColor(COLOR_MUTED)
             setTextSize(TypedValue.COMPLEX_UNIT_PX, ui.sp(9f))
             gravity = Gravity.CENTER
