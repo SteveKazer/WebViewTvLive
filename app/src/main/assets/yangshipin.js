@@ -1,15 +1,13 @@
 // =====================================================================
 // 央视频TV 注入脚本 (注入到 https://www.yangshipin.cn/tv/home)
 // ---------------------------------------------------------------------
-// 核心思想: 只打开一个标签页, 沉浸式播放。
+// 核心思想: 只打开一个标签页, 沉浸式播放。(v2.4.0 系统 WebView/Chromium 版)
 //
 // 沉浸式方案(已实测):
 //   页面自身的"全屏"按钮在部分设备上不可靠, 因此改为注入 CSS:
 //   - 隐藏网页头部/频道侧栏/节目单/页脚
 //   - 把播放器容器(.c-container)固定为铺满整个视口
-//   - 隐藏 video.js 大播放按钮(.vjs-big-play-button) ——
-//     X5 内核下切换清晰度/换台时视频短暂进入 paused 态,
-//     video.js 会渲染一个巨大的播放图标, 属视觉干扰, 直接隐藏。
+//   - 隐藏 video.js 大播放按钮(.vjs-big-play-button)
 //   切换频道时页面原生的"全力加载中"提示保留在播放器内。
 //
 // 换台/清晰度: 以"隐藏鼠标"程序化点击页面上的对应按钮完成。
@@ -17,18 +15,17 @@
 //   当前频道:  .tvSelect
 //   清晰度:    .bei-list .item (蓝光/超清/高清, 隐藏态可直接点击)
 //
-// 暂停盖层(实测定位):
-//   X5 内核在视频 paused 时会在视频表面渲染原生大播放图标,
-//   无法用 CSS 隐藏(不在 DOM)。方案: 视频 paused/无数据时直接
-//   visibility:hidden 隐藏 video 元素(视频层整体不渲染, 原生图标
-//   随之消失), 恢复播放即恢复显示; 另保留黑底 DOM 盖层(z:50)双保险。
+// 视频隐藏器:
+//   视频 paused/无数据或换台/切清晰度瞬间(在动作第一行)直接把 video 元素
+//   visibility:hidden —— 切换过程黑幕平滑过渡、不露旧画面/控制条, 
+//   恢复播放(playing/canplay)立即恢复显示; 事件驱动 + 200ms 轮询兑底。
 //
 // 频道检测:
 //   每帧扫描页面频道 pill, 集合变化时上报原生 notifyChannels(json),
 //   原生据此决定库中哪些频道可见(备用卫视检测到即显示)。
 //
-// 播放看门狗(电视卡死自愈, 实测页面 loading 层为 .loading.black-bg):
-//   - 视频存在但 paused: 每 2 秒强制 video.play()
+// 播放看门狗(播放卡死自愈, 实测页面 loading 层为 .loading.black-bg):
+//   - 视频存在但 paused: 持续超 4 秒强制 video.play()
 //   - 持续卡住超过 ~14 秒: 自动降一档清晰度(蓝光->超清->高清)重试
 //   - 视频已在播但页面 loading 层仍卡住 >2 秒: 强制隐藏该层
 //
@@ -95,37 +92,36 @@
 
 	window.__WVT__ = {
 
-	// 换台: 映射点击页面频道按钮
-	switchChannel: function(name) {
-		var pill = findPill(name);
-		if (!pill) { console.error('[WVT] channel not found: ' + name); return false; }
-		var cur = q('.tvSelect');
-		if (cur && norm(cur.textContent) === norm(name)) { return true; } // 已是该频道
-		setVideoSurface(q('video'), true); // 动作瞬间即隐藏视频, 杜绝空窗期原生大播放图标
-		pill.click();
-		stallSince = Date.now(); // 换台后重置卡住计时
-		fsActive = false; // 换台会退出全屏接管, 重新请求
-		log('switchChannel -> ' + name);
-		return true;
-	},
+		// 换台: 映射点击页面频道按钮
+		switchChannel: function(name) {
+			var pill = findPill(name);
+			if (!pill) { console.error('[WVT] channel not found: ' + name); return false; }
+			var cur = q('.tvSelect');
+			if (cur && norm(cur.textContent) === norm(name)) { return true; } // 已是该频道
+			setVideoSurface(q('video'), true); // 动作瞬间即隐藏视频, 切换过程黑幕平滑过渡
+			pill.click();
+			stallSince = Date.now(); // 换台后重置卡住计时
+			log('switchChannel -> ' + name);
+			return true;
+		},
 
-	// 设置清晰度: 隐藏态直接点击清晰度菜单项(已实测生效)
-	setQuality: function(label) {
-		var items = qa('.bei-list .item');
-		var target = norm(label);
-		for (var i = 0; i < items.length; i++) {
-			if (norm(items[i].textContent).indexOf(target) >= 0) {
-				if (!/active/.test(items[i].className)) {
-					setVideoSurface(q('video'), true); // 切流瞬间即隐藏, 杜绝空窗期原生大播放图标
-					items[i].click();
+		// 设置清晰度: 隐藏态直接点击清晰度菜单项(已实测生效)
+		setQuality: function(label) {
+			var items = qa('.bei-list .item');
+			var target = norm(label);
+			for (var i = 0; i < items.length; i++) {
+				if (norm(items[i].textContent).indexOf(target) >= 0) {
+					if (!/active/.test(items[i].className)) {
+						setVideoSurface(q('video'), true); // 切流瞬间即隐藏, 平滑过渡
+						items[i].click();
+					}
+					log('setQuality -> ' + label);
+					return true;
 				}
-				log('setQuality -> ' + label);
-				return true;
 			}
-		}
-		console.error('[WVT] quality not found: ' + label + ', items=' + items.length);
-		return false;
-	},
+			console.error('[WVT] quality not found: ' + label + ', items=' + items.length);
+			return false;
+		},
 
 		// 沉浸式样式是否已生效
 		isImmersive: function() {
@@ -234,58 +230,6 @@
 		setTimeout(watchVideoSurface, 200);
 	}
 
-	// 1.7 X5 原生视频全屏接管(电视修复, 参照原项目 WebViewTvLive 机制):
-	//     video.requestFullscreen() -> X5 onShowCustomView -> 视频进入原生接管层,
-	//     脱离 DOM 渲染路径, 电视上也能正常硬解播放(原 APK 在电视上正常即因于此)。
-	//     换台/切清晰度会退出接管, 起播后自动重新请求;
-	//     requestFullscreen 连续失败时降级到原生 F 键通道(原项目方案)。
-	var fsActive = false;
-	var fsFailCount = 0;
-	var lastFsTry = 0;
-	function nativeFullscreen() {
-		try { return !!(window.main && window.main.isVideoFullscreen && window.main.isVideoFullscreen()); }
-		catch (e) { return false; }
-	}
-	function requestVideoFullscreen() {
-		var v = q('video');
-		if (!v || v.paused) { return; }
-		if (document.fullscreenElement) { fsActive = true; return; }
-		try {
-			var p = v.requestFullscreen();
-			fsActive = (p === undefined); // X5 同步无返回值视为已请求
-			if (p && typeof p.then === 'function') {
-				p.then(function() { fsActive = true; fsFailCount = 0; log('video fullscreen active'); })
-				 .catch(function() { fsActive = false; fsFailCount++; });
-			} else { fsFailCount = 0; }
-		} catch (e) { fsActive = false; fsFailCount++; }
-	}
-	function watchFullscreen() {
-		try {
-			var v = q('video');
-			if (v && !v.paused) {
-				if (document.fullscreenElement || nativeFullscreen()) {
-					fsFailCount = 0;
-				} else if (Date.now() - lastFsTry > 3000) {
-					lastFsTry = Date.now();
-					if (fsFailCount >= 6) {
-						// requestFullscreen 连续失败 -> 原生 F 键通道(键码到达页面后再请求)
-						callNative('schemeEnterFullscreen');
-						fsFailCount = 3; // 降级通道重试几轮后再回 requestFullscreen
-					} else {
-						requestVideoFullscreen();
-				}
-				}
-			}
-		} catch (e) { /* ignore */ }
-		setTimeout(watchFullscreen, 2000);
-	}
-	// F 键(原生 dispatch)到达页面: 直接请求全屏接管
-	document.addEventListener('keydown', function(e) {
-		if ((e.key === 'f' || e.key === 'F') && !document.fullscreenElement) {
-			requestVideoFullscreen();
-		}
-	}, true);
-
 	// 2. 向原生上报播放状态; 首帧就绪后通知揭幕
 	var lastNotify = 0;
 	var firstFrameSent = false;
@@ -382,13 +326,12 @@
 		setTimeout(watchDetect, 5000);
 	}
 
-	log('injected, yangshipin immersive edition v2.3.3');
+	log('injected, yangshipin immersive edition v2.4.0 (chromium)');
 	injectImmersiveCss();
 	watchImmersive();
 	watchVideo();
 	watchStall();
 	watchVideoSurface();
-	watchFullscreen();
 	watchDetect();
 	callNative('notifyScriptReady');
 })();

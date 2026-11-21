@@ -9,24 +9,20 @@ import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.Log
 import android.view.Gravity
-import android.view.KeyEvent
 import android.view.View
+import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
+import android.webkit.JsResult
+import android.webkit.PermissionRequest
+import android.webkit.SslError
+import android.webkit.SslErrorHandler
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.FrameLayout
-import com.tencent.smtt.export.external.extension.proxy.ProxyWebChromeClientExtension
-import com.tencent.smtt.export.external.extension.proxy.ProxyWebViewClientExtension
-import com.tencent.smtt.export.external.interfaces.ConsoleMessage
-import com.tencent.smtt.export.external.interfaces.IX5WebChromeClient
-import com.tencent.smtt.export.external.interfaces.JsResult
-import com.tencent.smtt.export.external.interfaces.MediaAccessPermissionsCallback
-import com.tencent.smtt.export.external.interfaces.SslError
-import com.tencent.smtt.export.external.interfaces.SslErrorHandler
-import com.tencent.smtt.export.external.interfaces.WebResourceRequest
-import com.tencent.smtt.export.external.interfaces.WebResourceResponse
-import com.tencent.smtt.sdk.WebChromeClient
-import com.tencent.smtt.sdk.WebSettings
-import com.tencent.smtt.sdk.WebView
-import com.tencent.smtt.sdk.WebViewClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -38,14 +34,15 @@ import kotlin.system.measureTimeMillis
 typealias LP = FrameLayout.LayoutParams
 
 /**
- * 央视频专用 WebView。
- * 保留原项目的腾讯 X5 电视浏览器环境与全屏视频(onShowCustomView)机制。
+ * 央视频专用 WebView —— 系统 WebView(Chromium) 版本。
  *
- * 全屏策略(多层兜底, 解决部分设备 JS 点击无效的问题):
- *   1. JS 程序化点击页面"整体全屏"按钮
- *   2. 真实触摸点击按钮坐标(传送到 WebView, 绕过遮罩)
- *   3. 真实双击视频画面中心
- *   4. 真实 F 键(video.js 快捷键)
+ * v2.4.0 起弃用腾讯 X5, 全面切换 Android 系统 WebView:
+ *  - 行为与桌面 Chrome 完全一致(注入 JS/沉浸式 CSS/隐藏大播放按钮等手段全部生效)
+ *  - 无 X5 私有原生视频层(不存在无法定制的原生大播放图标/控制条)
+ *  - 视频 HLS 直播由 Chromium 原生支持
+ *
+ * 视频铺满采用注入 JS 的沉浸式 CSS 方案(见 assets/yangshipin.js),
+ * onShowCustomView 仅作为系统 WebView 意外全屏时的兜底处理。
  */
 @Suppress("unused", "DEPRECATION")
 @SuppressLint("SetJavaScriptEnabled")
@@ -125,12 +122,10 @@ class WebpageAdapterWebView @JvmOverloads constructor(
         }
     }
 
-    private val clientExtension = object : ProxyWebViewClientExtension() {}
-
     private val chromeClient = object : WebChromeClient() {
 
         private var view: View? = null
-        private var callback: IX5WebChromeClient.CustomViewCallback? = null
+        private var callback: CustomViewCallback? = null
         var videoRatio = RATIO_16_9
 
         override fun onJsAlert(view: WebView, url: String, message: String?, result: JsResult): Boolean {
@@ -158,6 +153,11 @@ class WebpageAdapterWebView @JvmOverloads constructor(
             return true
         }
 
+        /** 页面请求媒体权限(播放音视频): 全部授权 */
+        override fun onPermissionRequest(request: PermissionRequest) {
+            request.grant(request.resources)
+        }
+
         fun generateLayoutParams(): FrameLayout.LayoutParams {
             val screenRadio = Fraction.getFraction(fullscreenContainer.width, fullscreenContainer.height)
             val compare = screenRadio.compareTo(videoRatio)
@@ -166,11 +166,11 @@ class WebpageAdapterWebView @JvmOverloads constructor(
             else LP(screenRadio.numerator, screenRadio.numerator * videoRatio.denominator / videoRatio.numerator, Gravity.CENTER)
         }
 
-        override fun onShowCustomView(view: View, callback: IX5WebChromeClient.CustomViewCallback) {
+        override fun onShowCustomView(view: View, callback: CustomViewCallback) {
             Log.i(TAG, "onShowCustomView")
             this.view = view
             this.callback = callback
-            fullscreenContainer.setBackgroundColor(Color.BLACK) // 接管时黑底(视频画面外留白区)
+            fullscreenContainer.setBackgroundColor(Color.BLACK)
             fullscreenContainer.addView(view, generateLayoutParams())
             isInFullscreen = true
         }
@@ -178,18 +178,11 @@ class WebpageAdapterWebView @JvmOverloads constructor(
         override fun onHideCustomView() {
             Log.i(TAG, "onHideCustomView")
             fullscreenContainer.removeView(view)
-            fullscreenContainer.setBackgroundColor(Color.TRANSPARENT) // 恢复透明, 不挡 WebView
+            fullscreenContainer.setBackgroundColor(Color.TRANSPARENT)
             callback?.onCustomViewHidden()
             view = null
             callback = null
             isInFullscreen = false
-        }
-    }
-
-    private val chromeClientExtension = object : ProxyWebChromeClientExtension() {
-        override fun onPermissionRequest(origin: String, resources: Long, callback: MediaAccessPermissionsCallback): Boolean {
-            callback.invoke(origin, 0, true)
-            return true
         }
     }
 
@@ -209,9 +202,7 @@ class WebpageAdapterWebView @JvmOverloads constructor(
         }
         apply {
             webViewClient = client
-            webViewClientExtension = clientExtension
             webChromeClient = chromeClient
-            webChromeClientExtension = chromeClientExtension
             setBackgroundColor(Color.BLACK)
             addJavascriptInterface(this, "main")
         }
@@ -315,23 +306,6 @@ class WebpageAdapterWebView @JvmOverloads constructor(
 
     @JavascriptInterface
     fun notifyVideoPlaying() {}
-
-    /** 查询当前是否处于 X5 原生视频全屏接管状态(供 JS 协同判断) */
-    @JavascriptInterface
-    fun isVideoFullscreen(): Boolean = isInFullscreen
-
-    /** JS 请求进入全屏接管(原项目方案): 向 WebView dispatch F 键,
-     *  键码到达页面 keydown -> JS 侧 requestFullscreen -> onShowCustomView */
-    @JavascriptInterface
-    fun schemeEnterFullscreen() {
-        if (isInFullscreen) return
-        Log.i(TAG, "schemeEnterFullscreen")
-        post {
-            val downTime = SystemClock.uptimeMillis()
-            dispatchKeyEvent(KeyEvent(downTime, downTime, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_F, 0))
-            dispatchKeyEvent(KeyEvent(downTime, SystemClock.uptimeMillis(), KeyEvent.ACTION_UP, KeyEvent.KEYCODE_F, 0))
-        }
-    }
 
     @JavascriptInterface
     fun setVideoSize(width: Int, height: Int) {
