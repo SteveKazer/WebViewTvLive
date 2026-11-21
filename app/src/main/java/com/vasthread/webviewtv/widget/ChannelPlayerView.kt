@@ -213,8 +213,8 @@ class ChannelPlayerView @JvmOverloads constructor(
         webView.switchChannel(name)
     }
 
+    /** 切清晰度: 不主动盖黑幕(JS 保持旧画面, 慢网 2.5 秒未起播时由 JS 通知再盖) */
     fun setQuality(qualityLabel: String) {
-        showSwitchCover()
         webView.setQuality(qualityLabel)
     }
 
