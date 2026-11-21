@@ -11,12 +11,17 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.vasthread.webviewtv.misc.UiScale
 import com.vasthread.webviewtv.playlist.Channels
-import kotlin.math.min
 
 /**
- * 清晰度弹窗(右侧紧凑面板)。
- * 手机: 点击屏幕右半边唤起; 电视: MENU 键唤起。
+ * 清晰度弹窗(右侧全高抽屉)。
+ *
+ * 布局: 上下占满整个屏幕高度, 贴右缘展示
+ *   - 上方: 播放清晰度选项
+ *   - 底部: 设置按钮占位(未来扩展, 当前点击提示即将上线)
+ *
+ * 手机: 点击屏幕右侧 30% 区域唤起; 电视: MENU 键唤起。
  */
 class QualitySheetView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
@@ -26,15 +31,17 @@ class QualitySheetView @JvmOverloads constructor(
         private const val COLOR_ACCENT = 0xFFF2B33D.toInt()
         private const val COLOR_TEXT = 0xFFF2F4F7.toInt()
         private const val COLOR_SUB = 0xFF98A2B3.toInt()
+        private const val COLOR_MUTED = 0xFF6B7484.toInt()
         private const val COLOR_PANEL = 0xF513161B.toInt()
         private const val COLOR_DIM = 0xB3000000.toInt()
     }
 
     interface Callback {
         fun onQualitySelected(label: String)
+        fun onSettingsClick()
     }
 
-    private val uiScale: Float
+    private val ui: UiScale = UiScale(context)
     private val options = mutableListOf<TextView>()
     private val labels = Channels.QUALITIES.toList()
 
@@ -44,54 +51,82 @@ class QualitySheetView @JvmOverloads constructor(
     init {
         isClickable = true
         isFocusable = false
-        val dm = context.resources.displayMetrics
-        uiScale = min(dm.heightPixels / 720f, dm.widthPixels / 1280f).coerceAtLeast(0.75f)
 
         val dim = View(context)
         dim.setBackgroundColor(COLOR_DIM)
         dim.setOnClickListener { dismiss() }
         addView(dim, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
-        val panelW = (dm.widthPixels * 0.30f).toInt()
+        // 右侧全高抽屉: 宽度 手机 30% / 平板 26% / 电视 24% 屏宽, 高度上下占满
+        val panelW = ui.widthOf(
+            when { ui.isTv -> 0.24f; ui.isTablet -> 0.26f; else -> 0.30f },
+            180f, 320f
+        )
         val panel = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            background = GradientDrawable().apply {
-                cornerRadius = 16f * uiScale
-                setColor(COLOR_PANEL)
-            }
-            setPadding((10 * uiScale).toInt(), (14 * uiScale).toInt(), (10 * uiScale).toInt(), (10 * uiScale).toInt())
+            background = roundedLeft(COLOR_PANEL, ui.dp(9f) * 1.8f)
+            setPadding(ui.dp(8f), ui.dp(14f), ui.dp(8f), ui.dp(14f))
         }
-        val lp = LayoutParams(panelW, LayoutParams.WRAP_CONTENT, Gravity.END or Gravity.CENTER_VERTICAL)
-        lp.rightMargin = (28f * uiScale).toInt()
-        addView(panel, lp)
+        addView(panel, LayoutParams(panelW, LayoutParams.MATCH_PARENT, Gravity.END or Gravity.CENTER_VERTICAL))
 
+        // ---- 上方: 清晰度选项 ----
         panel.addView(TextView(context).apply {
             text = "播放清晰度"
             setTextColor(COLOR_SUB)
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, 12f * uiScale)
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, ui.sp(11f))
             gravity = Gravity.CENTER
             letterSpacing = 0.08f
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-            bottomMargin = (10 * uiScale).toInt()
+            bottomMargin = ui.dp(8f)
         })
 
         labels.forEachIndexed { index, label ->
             val option = TextView(context).apply {
                 text = label
                 setTextColor(COLOR_TEXT)
-                setTextSize(TypedValue.COMPLEX_UNIT_PX, 14f * uiScale)
+                setTextSize(TypedValue.COMPLEX_UNIT_PX, ui.sp(13f))
                 gravity = Gravity.CENTER
                 isFocusable = true
                 isClickable = true
-                background = itemBackground(8f * uiScale)
+                background = itemBackground(ui.dp(5f) * 1.6f)
                 setOnClickListener { callback?.onQualitySelected(labels[index]) }
                 layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, (44f * uiScale).toInt()
-                ).apply { bottomMargin = (4 * uiScale).toInt() }
+                    LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(40f)
+                ).apply { bottomMargin = ui.dp(3f) }
             }
             options.add(option)
             panel.addView(option)
         }
+
+        // ---- 中间弹性留白 ----
+        val spacer = View(context)
+        panel.addView(spacer, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+
+        // ---- 底部: 设置按钮占位(未来扩展) ----
+        val settings = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            isFocusable = true
+            isClickable = true
+            background = itemBackground(ui.dp(5f) * 1.6f)
+            setOnClickListener { callback?.onSettingsClick() }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(46f)
+            )
+        }
+        settings.addView(TextView(context).apply {
+            text = "设置"
+            setTextColor(COLOR_TEXT)
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, ui.sp(13f))
+            gravity = Gravity.CENTER
+        })
+        settings.addView(TextView(context).apply {
+            text = "敬请期待"
+            setTextColor(COLOR_MUTED)
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, ui.sp(9f))
+            gravity = Gravity.CENTER
+        })
+        panel.addView(settings)
     }
 
     fun open(quality: String) {
@@ -110,6 +145,12 @@ class QualitySheetView @JvmOverloads constructor(
         visibility = GONE
         onDismissCallback?.invoke()
     }
+
+    private fun roundedLeft(color: Int, radius: Float): GradientDrawable =
+        GradientDrawable().apply {
+            cornerRadii = floatArrayOf(radius, radius, 0f, 0f, 0f, 0f, radius, radius)
+            setColor(color)
+        }
 
     private fun itemBackground(radius: Float): StateListDrawable {
         fun shape(color: Int) = GradientDrawable().apply {

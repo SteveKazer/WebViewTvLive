@@ -2,30 +2,34 @@ package com.vasthread.webviewtv.widget
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.util.AttributeSet
-import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.vasthread.webviewtv.misc.UiScale
 import com.vasthread.webviewtv.playlist.Channels
 import com.vasthread.webviewtv.playlist.Channels.Channel
-import kotlin.math.min
 
 /**
  * 频道列表弹窗(左侧抽屉式, 程序化自适应布局)。
  *
  * 左侧分类: 全部 / 央视 / 卫视 / ★收藏(底部, 可滚动)
- * 右侧频道: 数字键编号 + 台标 + 名称 + 播放中标识
- * 尺寸按屏幕真实像素计算, 手机与电视一致体验。
+ * 右侧频道: 数字键编号 + 官方台标图 + 名称 + 播放中标识
+ *
+ * 尺寸体系(UiScale): 设计尺寸以 dp 给出, 手机 1.0x / 平板 1.12x / 电视 1.30x;
+ * 面板宽度按设备类别取屏宽占比并钳制, 手机不超宽、电视不缩成一条。
  *
  * 手机触摸: 点击选台, 长按收藏
  * 电视遥控: 十字键导航 + OK 选台 + 长按 OK 收藏
@@ -51,7 +55,10 @@ class ChannelSheetView @JvmOverloads constructor(
         fun onFavoriteToggle(name: String)
     }
 
-    private val uiScale: Float
+    private val ui: UiScale = UiScale(context)
+
+    /** 台标位图缓存(assets 解码) */
+    private val logoCache = HashMap<String, Bitmap?>()
 
     private val rail: LinearLayout
     private val tabAll: TextView
@@ -77,8 +84,6 @@ class ChannelSheetView @JvmOverloads constructor(
     init {
         isClickable = true
         isFocusable = false
-        val dm = context.resources.displayMetrics
-        uiScale = min(dm.heightPixels / 720f, dm.widthPixels / 1280f).coerceAtLeast(0.75f)
 
         // 半透明遮罩, 点击关闭
         val dim = View(context)
@@ -86,24 +91,27 @@ class ChannelSheetView @JvmOverloads constructor(
         dim.setOnClickListener { dismiss() }
         addView(dim, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
-        // 左侧抽屉面板
-        val panelW = (dm.widthPixels * 0.66f).toInt()
-        val panelH = (dm.heightPixels * 0.88f).toInt()
+        // 左侧抽屉面板: 手机 56% / 平板 46% / 电视 40% 屏宽, 高 88%
+        val panelW = ui.widthOf(
+            when { ui.isTv -> 0.40f; ui.isTablet -> 0.46f; else -> 0.56f },
+            260f, 420f
+        )
+        val panelH = (context.resources.displayMetrics.heightPixels * 0.88f).toInt()
         val railW = (panelW * 0.30f).toInt()
 
         val panel = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            background = rounded(COLOR_PANEL, 18f * uiScale)
+            background = rounded(COLOR_PANEL, ui.dp(10f) * 1.8f)
         }
         val panelLp = LayoutParams(panelW, panelH, Gravity.START or Gravity.CENTER_VERTICAL)
-        panelLp.leftMargin = (14f * uiScale).toInt()
+        panelLp.leftMargin = ui.dp(8f)
         addView(panel, panelLp)
 
         // ---- 左侧分类栏: 上方分类可滚动, 底部收藏固定 ----
         rail = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            background = roundedLeft(COLOR_RAIL, 18f * uiScale)
-            setPadding(0, (14 * uiScale).toInt(), 0, (10 * uiScale).toInt())
+            background = roundedLeft(COLOR_RAIL, ui.dp(10f) * 1.8f)
+            setPadding(0, ui.dp(8f), 0, ui.dp(6f))
         }
         panel.addView(rail, LinearLayout.LayoutParams(railW, LinearLayout.LayoutParams.MATCH_PARENT))
 
@@ -117,8 +125,8 @@ class ChannelSheetView @JvmOverloads constructor(
         tabsBox.addView(TextView(context).apply {
             text = "频道列表"
             setTextColor(COLOR_MUTED)
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, 12f * uiScale)
-            setPadding((14 * uiScale).toInt(), 0, 0, (10 * uiScale).toInt())
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ui.sp(11f))
+            setPadding(ui.dp(10f), 0, 0, ui.dp(8f))
             letterSpacing = 0.08f
         })
 
@@ -144,8 +152,8 @@ class ChannelSheetView @JvmOverloads constructor(
 
         listTitle = TextView(context).apply {
             setTextColor(COLOR_SUB)
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, 12f * uiScale)
-            setPadding((14 * uiScale).toInt(), (14 * uiScale).toInt(), (14 * uiScale).toInt(), (8 * uiScale).toInt())
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ui.sp(11f))
+            setPadding(ui.dp(10f), ui.dp(10f), ui.dp(10f), ui.dp(6f))
         }
         content.addView(listTitle, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
 
@@ -154,18 +162,18 @@ class ChannelSheetView @JvmOverloads constructor(
             adapter = this@ChannelSheetView.adapter
             overScrollMode = View.OVER_SCROLL_NEVER
             clipToPadding = false
-            setPadding((10 * uiScale).toInt(), 0, (10 * uiScale).toInt(), (10 * uiScale).toInt())
+            setPadding(ui.dp(6f), 0, ui.dp(6f), ui.dp(8f))
         }
         val listLp = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-        listLp.topMargin = (36 * uiScale).toInt()
+        listLp.topMargin = ui.dp(28f)
         content.addView(list, listLp)
 
         emptyHint = TextView(context).apply {
             text = "收藏夹还是空的\n长按频道即可加入收藏"
             setTextColor(COLOR_MUTED)
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, 14f * uiScale)
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ui.sp(12f))
             gravity = Gravity.CENTER
-            setLineSpacing(6f * uiScale, 1f)
+            setLineSpacing(ui.sp(5f), 1f)
             visibility = View.GONE
         }
         content.addView(emptyHint, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
@@ -224,15 +232,15 @@ class ChannelSheetView @JvmOverloads constructor(
         return TextView(context).apply {
             this.text = text
             setTextColor(COLOR_SUB)
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, 14f * uiScale)
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ui.sp(13f))
             gravity = Gravity.CENTER_VERTICAL
             isFocusable = true
             isClickable = true
-            setPadding((16 * uiScale).toInt(), 0, 0, 0)
-            background = itemBackground(10f * uiScale)
+            setPadding(ui.dp(12f), 0, 0, 0)
+            background = itemBackground(ui.dp(6f) * 1.6f)
             layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, (46f * uiScale).toInt()
-            ).apply { setMargins((8 * uiScale).toInt(), 0, (8 * uiScale).toInt(), (3 * uiScale).toInt()) }
+                LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(40f)
+            ).apply { setMargins(ui.dp(6f), 0, ui.dp(6f), ui.dp(2f)) }
         }
     }
 
@@ -248,10 +256,6 @@ class ChannelSheetView @JvmOverloads constructor(
         tabCctv.setTextColor(if (currentTab == Channels.TAB_CCTV) COLOR_ACCENT else COLOR_SUB)
         tabWeishi.setTextColor(if (currentTab == Channels.TAB_WEISHI) COLOR_ACCENT else COLOR_SUB)
         tabFavorite.setTextColor(if (currentTab == Channels.TAB_FAVORITE) COLOR_ACCENT else COLOR_SUB)
-        tabAll.alpha = if (currentTab == Channels.TAB_ALL) 1f else 0.85f
-        tabCctv.alpha = if (currentTab == Channels.TAB_CCTV) 1f else 0.85f
-        tabWeishi.alpha = if (currentTab == Channels.TAB_WEISHI) 1f else 0.85f
-        tabFavorite.alpha = if (currentTab == Channels.TAB_FAVORITE) 0.85f else 0.85f
 
         tabAll.text = "全部 ${Channels.ALL.size}"
         tabCctv.text = "央视 ${Channels.CCTV.size}"
@@ -260,7 +264,7 @@ class ChannelSheetView @JvmOverloads constructor(
 
         val data = channelsOf(currentTab)
         listTitle.text = when (currentTab) {
-            Channels.TAB_CCTV -> "央视频道 · 数字键 1-14"
+            Channels.TAB_CCTV -> "央视频道 · 数字键 1-27"
             Channels.TAB_WEISHI -> "卫视频道 · 本省优先 · 数字键 101-124"
             Channels.TAB_FAVORITE -> "我的收藏 · 上下换台仅在本列表内"
             else -> "全部频道 · 数字键直接选台"
@@ -290,6 +294,17 @@ class ChannelSheetView @JvmOverloads constructor(
             list.findViewHolderForAdapterPosition(position)?.itemView?.requestFocus()
                 ?: list.getChildAt(0)?.requestFocus()
         }
+    }
+
+    // ---------------- 台标加载 ----------------
+
+    private fun logoOf(asset: String): Bitmap? {
+        if (logoCache.containsKey(asset)) return logoCache[asset]
+        val bmp = runCatching {
+            context.assets.open(asset).use { BitmapFactory.decodeStream(it) }
+        }.getOrNull()
+        logoCache[asset] = bmp
+        return bmp
     }
 
     // ---------------- 样式助手 ----------------
@@ -342,7 +357,7 @@ class ChannelSheetView @JvmOverloads constructor(
         }
     }
 
-    /** 程序化构建频道行 */
+    /** 程序化构建频道行: [编号] [台标图] [名称] [播放中] */
     @SuppressLint("ClickableViewAccessibility")
     private fun buildRow(): View {
         val row = LinearLayout(context).apply {
@@ -350,42 +365,41 @@ class ChannelSheetView @JvmOverloads constructor(
             gravity = Gravity.CENTER_VERTICAL
             isFocusable = true
             isClickable = true
-            background = itemBackground(8f * uiScale)
-            setPadding((6 * uiScale).toInt(), 0, (10 * uiScale).toInt(), 0)
+            background = itemBackground(ui.dp(5f) * 1.6f)
+            setPadding(ui.dp(4f), 0, ui.dp(8f), 0)
             layoutParams = RecyclerView.LayoutParams(
-                RecyclerView.LayoutParams.MATCH_PARENT, (46f * uiScale).toInt()
-            ).apply { bottomMargin = (4 * uiScale).toInt() }
+                RecyclerView.LayoutParams.MATCH_PARENT, ui.dp(44f)
+            ).apply { bottomMargin = ui.dp(3f) }
         }
 
         val number = TextView(context).apply {
             gravity = Gravity.CENTER
             setTextColor(COLOR_SUB)
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, 11f * uiScale)
-            background = rounded(COLOR_CHIP, 5f * uiScale)
-            layoutParams = LinearLayout.LayoutParams((44f * uiScale).toInt(), (23f * uiScale).toInt())
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ui.sp(10f))
+            background = rounded(COLOR_CHIP, ui.dp(4f))
+            layoutParams = LinearLayout.LayoutParams(ui.dp(34f), ui.dp(20f))
             tag = "number"
         }
         row.addView(number)
 
-        val badge = TextView(context).apply {
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, 11f * uiScale)
-            layoutParams = LinearLayout.LayoutParams((38f * uiScale).toInt(), (23f * uiScale).toInt()).apply {
-                leftMargin = (8 * uiScale).toInt()
+        // 官方台标图(原图 72x36, 2:1)
+        val logo = ImageView(context).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            layoutParams = LinearLayout.LayoutParams(ui.dp(46f), ui.dp(22f)).apply {
+                leftMargin = ui.dp(6f)
             }
-            tag = "badge"
+            tag = "logo"
         }
-        row.addView(badge)
+        row.addView(logo)
 
         val name = TextView(context).apply {
             setTextColor(COLOR_TEXT)
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, 14f * uiScale)
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ui.sp(14f))
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                leftMargin = (10 * uiScale).toInt()
-                rightMargin = (6 * uiScale).toInt()
+                leftMargin = ui.dp(8f)
+                rightMargin = ui.dp(4f)
             }
             tag = "name"
         }
@@ -394,7 +408,7 @@ class ChannelSheetView @JvmOverloads constructor(
         val playing = TextView(context).apply {
             text = "播放中"
             setTextColor(COLOR_ACCENT)
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, 10f * uiScale)
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ui.sp(10f))
             visibility = View.GONE
             tag = "playing"
         }
@@ -406,7 +420,7 @@ class ChannelSheetView @JvmOverloads constructor(
     private inner class ChannelHolder(private val row: View) : RecyclerView.ViewHolder(row) {
 
         private val tvNumber: TextView = row.findViewWithTag("number")
-        private val tvBadge: TextView = row.findViewWithTag("badge")
+        private val ivLogo: ImageView = row.findViewWithTag("logo")
         private val tvName: TextView = row.findViewWithTag("name")
         private val tvPlaying: TextView = row.findViewWithTag("playing")
         private var channelName: String = ""
@@ -437,12 +451,7 @@ class ChannelSheetView @JvmOverloads constructor(
         fun bind(channel: Channel) {
             channelName = channel.name
             tvNumber.text = String.format("%03d", channel.number)
-            tvBadge.text = channel.badge
-            tvBadge.setTextSize(
-                TypedValue.COMPLEX_UNIT_PX,
-                (if (channel.badge.length > 2) 9f else 11f) * uiScale
-            )
-            tvBadge.background = rounded(channel.badgeColor, 5f * uiScale)
+            ivLogo.setImageBitmap(logoOf(channel.logoAsset))
             tvName.text = channel.name
             val isCurrent = channel.name == currentChannel
             tvPlaying.visibility = if (isCurrent) VISIBLE else GONE

@@ -1,9 +1,7 @@
 package com.vasthread.webviewtv.activity
 
 import android.annotation.SuppressLint
-import android.content.Context
 import android.os.Bundle
-import android.util.AttributeSet
 import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -21,7 +19,6 @@ import com.vasthread.webviewtv.widget.ChannelPlayerView
 import com.vasthread.webviewtv.widget.ChannelSheetView
 import com.vasthread.webviewtv.widget.QualitySheetView
 import com.vasthread.webviewtv.widget.UiLayout
-import me.jessyan.autosize.AutoSize
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -168,16 +165,20 @@ class MainActivity : AppCompatActivity() {
 			}
 		}
 		channelSheet.onDismissCallback = { uiMode = UiMode.STANDARD }
-		qualitySheet.callback = object : QualitySheetView.Callback {
-			override fun onQualitySelected(label: String) {
-				lastQuality = label
-				saveState()
-				playerView.setQuality(label)
-				channelSheet.setCurrent(lastChannel)
-				toast("已切换为 $label")
-				uiMode = UiMode.STANDARD
-			}
+	qualitySheet.callback = object : QualitySheetView.Callback {
+		override fun onQualitySelected(label: String) {
+			lastQuality = label
+			saveState()
+			playerView.setQuality(label)
+			channelSheet.setCurrent(lastChannel)
+			toast("已切换为 $label")
+			uiMode = UiMode.STANDARD
 		}
+
+		override fun onSettingsClick() {
+			toast("设置功能即将上线")
+		}
+	}
 		qualitySheet.onDismissCallback = { uiMode = UiMode.STANDARD }
 	}
 
@@ -318,11 +319,6 @@ class MainActivity : AppCompatActivity() {
 	}
 
 	// ---------------- 生命周期 ----------------
-
-	override fun onCreateView(parent: View?, name: String, context: Context, attrs: AttributeSet): View? {
-		AutoSize.autoConvertDensityOfGlobal(this)
-		return super.onCreateView(parent, name, context, attrs)
-	}
 
 	override fun onResume() {
 		super.onResume()

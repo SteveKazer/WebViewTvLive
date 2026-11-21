@@ -11,8 +11,8 @@ android {
         applicationId = "com.stevekazer.yangshiplive"
         minSdk = 21
         targetSdk = 34
-        versionCode = 22
-        versionName = "2.2.0-yangshipin"
+        versionCode = 23
+        versionName = "2.3.0-yangshipin"
     }
 
     buildTypes {
@@ -41,6 +41,5 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("com.tencent.tbs:tbssdk:44286")
-    implementation("com.github.JessYanCoding:AndroidAutoSize:v1.2.1")
     implementation("org.apache.commons:commons-lang3:3.0")
 }

@@ -21,8 +21,9 @@ import com.vasthread.webviewtv.R
  * 播放器视图: 启动遮罩 + 防误触遮罩 + 映射点击。
  *
  * 触摸:
- *   - 单击屏幕左半边: 唤起频道列表
- *   - 单击屏幕右半边: 唤起清晰度
+ *   - 单击屏幕左侧 30%: 唤起频道列表
+ *   - 单击屏幕右侧 30%: 唤起清晰度(全高右抽屉, 底部含设置占位)
+ *   - 中间 40% 不响应, 避免误触
  *   - 向上滑动: 下一个频道; 向下滑动: 上一个频道
  *   触摸不透传给网页。
  * 电视: 按键不透传给网页, 全部交由 MainActivity 处理。
@@ -78,7 +79,10 @@ class ChannelPlayerView @JvmOverloads constructor(
         @SuppressLint("ClickableViewAccessibility")
         override fun onSingleTapUp(e: MotionEvent): Boolean {
             if (firstFrame) {
-                if (e.x < width / 2f) leftTapCallback?.invoke() else rightTapCallback?.invoke()
+                // 左侧 30% -> 频道列表; 右侧 30% -> 清晰度; 中间 40% 不响应
+                val edge = width * 0.30f
+                if (e.x < edge) leftTapCallback?.invoke()
+                else if (e.x > width - edge) rightTapCallback?.invoke()
             }
             return true
         }

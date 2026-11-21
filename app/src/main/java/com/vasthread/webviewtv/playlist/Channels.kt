@@ -1,11 +1,13 @@
 package com.vasthread.webviewtv.playlist
 
-import android.graphics.Color
-
 /**
  * 央视频(tv/home)内置频道表。
  * 名称必须与页面频道按钮文本一致(见 assets/yangshipin.js 的归一化匹配)。
- * 页面上的付费频道(限免/VIP)一律不收录; 央视只保留 CCTV1-14。
+ * 页面上的付费频道(限免/VIP)一律不收录。
+ *
+ * 台标: assets/logos/logo_<编号>.png, 取自央视频页面官方台标图。
+ * 央视: 全部免费频道按页面顺序(数字键 1-27)。
+ * 卫视: 固定编号 101-124(与显示顺序解耦, 地区优先只影响排序)。
  */
 object Channels {
 
@@ -27,36 +29,28 @@ object Channels {
     const val TAB_WEISHI = 2
     const val TAB_FAVORITE = 3
 
-    /** 央视台标底色(统一深红) */
-    private val CCTV_COLOR = Color.rgb(0x8E, 0x22, 0x22)
-
-    /** 卫视台标底色(统一深蓝) */
-    private val WEISHI_COLOR = Color.rgb(0x1F, 0x3A, 0x5F)
-
     data class Channel(
         val name: String,      // 与页面 pill 完全一致的频道名
         val category: Int,     // 央视 / 卫视
-        val badge: String,     // 台标徽章文字
-        val number: Int,       // 数字键选台编号(央视 1-14, 卫视 101-124)
-        val badgeColor: Int,   // 徽章底色
+        val number: Int,       // 数字键选台编号(央视 1-27, 卫视 101-124)
+        val logoAsset: String, // assets/logos 下的台标图文件名
     )
 
-    /** 央视: 只保留 CCTV1 - CCTV14 */
+    /** 央视: 页面全部免费频道, 按页面顺序 */
     private val cctvDefs = listOf(
-        "CCTV1" to "央一", "CCTV2" to "央二", "CCTV3" to "央三", "CCTV4" to "央四",
-        "CCTV5" to "央五", "CCTV6" to "央六", "CCTV7" to "央七", "CCTV8" to "央八",
-        "CCTV9" to "央九", "CCTV10" to "央十", "CCTV11" to "十一", "CCTV12" to "十二",
-        "CCTV13" to "十三", "CCTV14" to "十四",
+        "CCTV1", "CCTV2", "CCTV3", "CCTV4", "CCTV5", "CCTV5+",
+        "CCTV6", "CCTV7", "CCTV8", "CCTV9", "CCTV10", "CCTV11",
+        "CCTV12", "CCTV13", "CCTV14", "CCTV15", "CCTV16-HD", "CCTV16(4K）",
+        "CCTV17", "CCTV4K", "CCTV8K", "CGTN", "CGTN法语频道", "CGTN俄语频道",
+        "CGTN阿拉伯语频道", "CGTN西班牙语频道", "CGTN外语纪录频道",
     )
 
-    /** 卫视: 固定编号 101-124(与显示顺序解耦, 地区优先只影响排序) */
+    /** 卫视: 页面顺序, 编号 101 起 */
     private val weishiDefs = listOf(
-        "北京卫视" to "京", "江苏卫视" to "苏", "东方卫视" to "沪", "浙江卫视" to "浙",
-        "湖南卫视" to "湘", "湖北卫视" to "鄂", "广东卫视" to "粤", "广西卫视" to "桂",
-        "黑龙江卫视" to "黑", "海南卫视" to "琼", "重庆卫视" to "渝", "深圳卫视" to "深",
-        "四川卫视" to "川", "河南卫视" to "豫", "福建东南卫视" to "闽", "贵州卫视" to "黔",
-        "江西卫视" to "赣", "辽宁卫视" to "辽", "安徽卫视" to "皖", "河北卫视" to "冀",
-        "山东卫视" to "鲁", "天津卫视" to "津", "中国教育电视台1频道" to "教", "新疆卫视" to "新",
+        "北京卫视", "江苏卫视", "东方卫视", "浙江卫视", "湖南卫视", "湖北卫视",
+        "广东卫视", "广西卫视", "黑龙江卫视", "海南卫视", "重庆卫视", "深圳卫视",
+        "四川卫视", "河南卫视", "福建东南卫视", "贵州卫视", "江西卫视", "辽宁卫视",
+        "安徽卫视", "河北卫视", "山东卫视", "天津卫视", "中国教育电视台1频道", "新疆卫视",
     )
 
     /** 省份 -> 对应卫视(用于地区优先排序) */
@@ -69,17 +63,17 @@ object Channels {
         "天津" to "天津卫视", "新疆" to "新疆卫视", "深圳" to "深圳卫视",
     )
 
-    /** 央视频道(固定顺序) */
+    /** 央视频道(固定顺序, 编号 1-27) */
     val CCTV: List<Channel> by lazy {
-        cctvDefs.mapIndexed { i, (name, badge) ->
-            Channel(name, TAB_CCTV, badge, i + 1, CCTV_COLOR)
+        cctvDefs.mapIndexed { i, name ->
+            Channel(name, TAB_CCTV, i + 1, "logos/logo_${i + 1}.png")
         }
     }
 
-    /** 卫视频道(固定顺序, 编号 101+) */
+    /** 卫视频道(固定顺序, 编号 101-124) */
     val WEISHI: List<Channel> by lazy {
-        weishiDefs.mapIndexed { i, (name, badge) ->
-            Channel(name, TAB_WEISHI, badge, 101 + i, WEISHI_COLOR)
+        weishiDefs.mapIndexed { i, name ->
+            Channel(name, TAB_WEISHI, 101 + i, "logos/logo_${101 + i}.png")
         }
     }
 

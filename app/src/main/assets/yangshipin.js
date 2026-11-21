@@ -7,12 +7,20 @@
 //   页面自身的"全屏"按钮在部分设备上不可靠, 因此改为注入 CSS:
 //   - 隐藏网页头部/频道侧栏/节目单/页脚
 //   - 把播放器容器(.c-container)固定为铺满整个视口
-//   切换频道时页面原生的"切换努力加载中"提示保留在播放器内。
+//   - 隐藏 video.js 大播放按钮(.vjs-big-play-button) ——
+//     X5 内核下切换清晰度/换台时视频短暂进入 paused 态,
+//     video.js 会渲染一个巨大的播放图标, 属视觉干扰, 直接隐藏。
+//   切换频道时页面原生的"全力加载中"提示保留在播放器内。
 //
 // 换台/清晰度: 以"隐藏鼠标"程序化点击页面上的对应按钮完成。
 //   频道按钮:  .tv-main-con-r-list-left > div
 //   当前频道:  .tvSelect
 //   清晰度:    .bei-list .item (蓝光/超清/高清, 隐藏态可直接点击)
+//
+// 播放看门狗(电视卡死自愈, 实测页面 loading 层为 .loading.black-bg):
+//   - 视频存在但 paused: 每 2 秒强制 video.play()
+//   - 持续卡住超过 ~14 秒: 自动降一档清晰度(蓝光->超清->高清)重试
+//   - 视频已在播但页面 loading 层仍卡住 >2 秒: 强制隐藏该层
 //
 // 对原生暴露 window.main (JavascriptInterface)
 // =====================================================================
@@ -60,7 +68,9 @@
 		'.c-container video { width:100% !important; height:100% !important; object-fit:contain !important; }',
 		'.y-full { width:100% !important; height:100% !important; }',
 		'.y-full-control, .y-control-outside, .volume-muted-tip-container { display:none !important; }',
-		'[class^="winG-mask"], [class^="winY-"], [class^="winA-mask"] { display:none !important; }'
+		'[class^="winG-mask"], [class^="winY-"], [class^="winA-mask"] { display:none !important; }',
+		// video.js 大播放按钮: X5 下换清晰度/换台瞬间视频进入 paused 态会渲染巨大播放图标, 隐藏之
+		'.vjs-big-play-button { display:none !important; }'
 	].join('\n');
 
 	function injectImmersiveCss() {
@@ -82,6 +92,7 @@
 			var cur = q('.tvSelect');
 			if (cur && norm(cur.textContent) === norm(name)) { return true; } // 已是该频道
 			pill.click();
+			stallSince = Date.now(); // 换台后重置卡住计时
 			log('switchChannel -> ' + name);
 			return true;
 		},
@@ -176,9 +187,61 @@
 		setTimeout(watchVideo, 800);
 	}
 
-	log('injected, yangshipin immersive edition v2.1');
+	// 3. 播放看门狗: 视频卡住(电视上页面 loading 永不消失)时自愈
+	//    - paused -> 每 2 秒强制 play()
+	//    - 卡住超过 14 秒 -> 自动降一档清晰度重试(最多降两档)
+	//    - 已播放但页面 loading 层卡住 >2 秒 -> 隐藏该层
+	var stallSince = Date.now();      // 本次卡住开始时间
+	var qualityDropLevel = 0;         // 本会话已自动降档次数(0=未降)
+	var playingNotified = 0;          // 播放中且 loading 可见的采样起点(0=未见)
+	var DROP_ORDER = ['超清', '高清'];  // 蓝光起依次降级
+
+	function watchStall() {
+		try {
+			var v = q('video');
+			var loading = q('.loading.black-bg');
+			var loadingVisible = !!(loading && getComputedStyle(loading).display !== 'none');
+
+			if (v && v.paused) {
+				// 视频暂停: 强制恢复播放(X5 下换清晰度/加载失败可能停在 paused)
+				if (Date.now() - stallSince > 4000) { // 只在卡住较久后干预, 避免影响页面自身逻辑
+					var p = v.play();
+					if (p && typeof p.catch === 'function') { p.catch(function() { /* autoplay 被拒, 等下次 */ }); }
+					log('stall watchdog: force play()');
+				}
+				// 卡住超过 14 秒 -> 自动降一档清晰度重试(含换台后卡死, 与首帧无关)
+				if (Date.now() - stallSince > 14000 && qualityDropLevel < DROP_ORDER.length) {
+					window.__WVT__.setQuality(DROP_ORDER[qualityDropLevel]);
+					qualityDropLevel++;
+					stallSince = Date.now(); // 给新清晰度一个完整的观察窗口
+					log('stall watchdog: drop quality -> ' + DROP_ORDER[qualityDropLevel - 1]);
+				}
+			}
+
+			// 已起播但页面 loading 层卡住不消失 -> 强制隐藏
+			if (v && !v.paused && loadingVisible) {
+				if (playingNotified === 0) { playingNotified = Date.now(); }
+				else if (Date.now() - playingNotified > 2000) {
+					loading.style.display = 'none';
+					log('stall watchdog: hide stuck page loading');
+					playingNotified = 0;
+				}
+			} else {
+				playingNotified = 0;
+			}
+
+			// 视频真正恢复播放时重置卡住计时
+			if (v && !v.paused && Date.now() - stallSince > 2000) {
+				stallSince = Date.now();
+			}
+		} catch (e) { /* ignore */ }
+		setTimeout(watchStall, 2000);
+	}
+
+	log('injected, yangshipin immersive edition v2.3');
 	injectImmersiveCss();
 	watchImmersive();
 	watchVideo();
+	watchStall();
 	callNative('notifyScriptReady');
 })();
