@@ -549,10 +549,5 @@ class ChannelSheetView @JvmOverloads constructor(
                 tvBadge.setTextColor(Color.WHITE)
             }
         }
-            tvName.text = channel.name
-            val isCurrent = channel.name == currentChannel
-            tvPlaying.visibility = if (isCurrent) VISIBLE else GONE
-            tvName.setTextColor(if (isCurrent) COLOR_ACCENT else COLOR_TEXT)
-        }
     }
 }
