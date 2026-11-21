@@ -14,7 +14,7 @@ import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
 import android.webkit.JsResult
 import android.webkit.PermissionRequest
-import android.webkit.SslError
+import android.net.http.SslError
 import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -193,7 +193,6 @@ class WebpageAdapterWebView @JvmOverloads constructor(
             mediaPlaybackRequiresUserGesture = false
             useWideViewPort = true
             loadWithOverviewMode = true
-            setAppCacheEnabled(true)
             cacheMode = WebSettings.LOAD_DEFAULT
             userAgentString = PC_USER_AGENT
             // 允许加载图片(站内\"努力加载中\"转圈动画是图片, 必须开启)
