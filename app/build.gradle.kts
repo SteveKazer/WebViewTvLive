@@ -11,8 +11,8 @@ android {
         applicationId = "com.stevekazer.yangshiplive"
         minSdk = 21
         targetSdk = 34
-        versionCode = 32
-        versionName = "2.4.5-yangshipin"
+        versionCode = 33
+        versionName = "2.4.6-yangshipin"
     }
 
     signingConfigs {
@@ -51,4 +51,6 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("org.apache.commons:commons-lang3:3.0")
+    // 腾讯 X5 内核(tbssdk 为纯包装 API, 体积小; 内核由其在运行时静默下载)
+    implementation("com.tencent.tbs:tbssdk:44286")
 }
