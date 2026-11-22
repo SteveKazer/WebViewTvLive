@@ -33,14 +33,23 @@ class LiveApplication : Application() {
                 TbsCoreSettings.TBS_SETTINGS_USE_DEXLOADER_SERVICE to true
             )
             QbSdk.initTbsSettings(settings)
+            // 允许在非 Wi-Fi 网络(电视网线/以太网等)下下载内核。
+            // X5 默认仅 Wi-Fi 下载内核, 电视插网线时会直接拒绝下载 —— 开启此项
+            try {
+                QbSdk.setDownloadWithoutWifi(true)
+            } catch (t: Throwable) {
+                Log.w(TAG, "setDownloadWithoutWifi failed", t)
+            }
             // 内核下载/安装进度回调: 更新全局状态, 设置页据此显示进度
             QbSdk.setTbsListener(object : TbsListener {
                 override fun onDownloadFinish(code: Int) {
                     Log.i(TAG, "X5 download finish, code=$code")
+                    if (code != 0) WebKernel.x5ErrorCode = code
                 }
 
                 override fun onInstallFinish(code: Int) {
                     Log.i(TAG, "X5 install finish, code=$code")
+                    if (code != 0) WebKernel.x5ErrorCode = code
                 }
 
                 override fun onDownloadProgress(progress: Int) {

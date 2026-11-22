@@ -23,6 +23,10 @@ object WebKernel {
     @Volatile
     var x5Progress: Int = -1
 
+    /** X5 内核下载/安装失败错误码(-1=无错误记录) */
+    @Volatile
+    var x5ErrorCode: Int = -1
+
     fun isX5(context: Context): Boolean =
         context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
             .getInt(KEY_WEB_KERNEL, 0) == 1

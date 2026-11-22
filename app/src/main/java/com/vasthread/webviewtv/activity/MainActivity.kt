@@ -256,8 +256,10 @@ class MainActivity : AppCompatActivity() {
 			WebKernel.x5Ready -> "腾讯 X5 内核已生效${if (ver > 0) "（v$ver）" else ""}。若播放异常可在设置中切回系统内核。"
 			WebKernel.x5Progress in 0..99 ->
 				"腾讯 X5 内核下载中 ${WebKernel.x5Progress}%（完成前自动使用系统内核，完成后重启应用生效）。"
+			WebKernel.x5ErrorCode >= 0 ->
+				"腾讯 X5 内核下载失败（错误码 ${WebKernel.x5ErrorCode}），请检查网络后重启应用重试。"
 			ver > 0 -> "腾讯 X5 内核已安装（v$ver），重启应用后生效。"
-			else -> "腾讯 X5 内核准备中：首次使用需联网下载（约 30~60MB），完成前自动使用系统内核，完成后重启应用生效。"
+			else -> "腾讯 X5 内核尚未开始下载：请保持联网（已允许 Wi-Fi/网线），不要频繁退出或重启，等待后台下载完成。"
 		}
 	}
 
