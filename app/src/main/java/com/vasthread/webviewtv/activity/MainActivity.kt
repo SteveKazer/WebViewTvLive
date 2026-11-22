@@ -101,7 +101,7 @@ class MainActivity : AppCompatActivity() {
 				UiMode.SETTINGS -> {
 					channelSheet.visibility = View.GONE
 					qualitySheet.visibility = View.GONE
-					settingsSheet.open(invertSwitch, autoUpdate, WebKernel.isX5(this))
+					settingsSheet.open(invertSwitch, autoUpdate, WebKernel.isX5(this), kernelNoteText())
 					repostCloseAction()
 				}
 				UiMode.STANDARD -> {
@@ -243,6 +243,19 @@ class MainActivity : AppCompatActivity() {
 
 	private fun startPlayerIfNeeded() {
 		playerView.start()
+	}
+
+	/** 设置页"播放内核"行的状态说明(含 X5 内核下载进度) */
+	private fun kernelNoteText(): String {
+		if (!WebKernel.isX5(this)) {
+			return "默认系统内核；老设备(如 Android 6.0 老电视)可选腾讯 X5。切换后重启应用生效。"
+		}
+		return when {
+			WebKernel.x5Ready -> "X5 内核已生效。若播放异常可在设置中切回系统内核。"
+			WebKernel.x5Progress in 0..99 ->
+				"X5 内核下载中 ${WebKernel.x5Progress}%（完成前自动使用系统内核，完成后重启应用生效）。"
+			else -> "X5 内核准备中：首次使用需联网下载（约 30~60MB），完成前自动使用系统内核，完成后重启应用生效。"
+		}
 	}
 
 	/** 页面就绪后恢复上次频道/清晰度(由注入脚本等待视频起播后执行) */

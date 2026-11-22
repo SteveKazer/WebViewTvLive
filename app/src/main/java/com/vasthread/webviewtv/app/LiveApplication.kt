@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import com.tencent.smtt.export.external.TbsCoreSettings
 import com.tencent.smtt.sdk.QbSdk
+import com.tencent.smtt.sdk.TbsListener
 import com.vasthread.webviewtv.misc.WebKernel
 import com.vasthread.webviewtv.misc.setApplication
 
@@ -32,12 +33,27 @@ class LiveApplication : Application() {
                 TbsCoreSettings.TBS_SETTINGS_USE_DEXLOADER_SERVICE to true
             )
             QbSdk.initTbsSettings(settings)
+            // 内核下载/安装进度回调: 更新全局状态, 设置页据此显示进度
+            QbSdk.setTbsListener(object : TbsListener {
+                override fun onDownloadFinish(code: Int) {
+                    Log.i(TAG, "X5 download finish, code=$code")
+                }
+
+                override fun onInstallFinish(code: Int) {
+                    Log.i(TAG, "X5 install finish, code=$code")
+                }
+
+                override fun onDownloadProgress(progress: Int) {
+                    WebKernel.x5Progress = progress
+                }
+            })
             QbSdk.initX5Environment(this, object : QbSdk.PreInitCallback {
                 override fun onCoreInitFinished() {
                     Log.i(TAG, "X5 core init finished")
                 }
 
                 override fun onViewInitFinished(isX5: Boolean) {
+                    WebKernel.x5Ready = isX5
                     Log.i(TAG, "X5 view init finished, isX5=$isX5")
                 }
             })

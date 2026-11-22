@@ -13,6 +13,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import com.vasthread.webviewtv.misc.UiScale
 
@@ -60,6 +61,7 @@ class SettingsSheetView @JvmOverloads constructor(
     private val toggleInvert: ToggleView
     private val toggleAutoUpdate: ToggleView
     private val kernelValue: TextView
+    private val kernelNote: TextView
     private val kernelOverlay: FrameLayout
     private val kernelOptions = mutableListOf<LinearLayout>()
     private var kernelX5 = false
@@ -74,17 +76,40 @@ class SettingsSheetView @JvmOverloads constructor(
         dim.setOnClickListener { dismiss() }
         addView(dim, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
-        // 居中面板: 手机 86% / 平板 60% / 电视 52% 屏宽, 高度随内容
+        // 居中面板: 手机 86% / 平板 60% / 电视 52% 屏宽;
+        // 内容超出屏幕时可上下滚动(面板高度上限 86% 屏高)
         val panelW = ui.widthOf(when { ui.isTv -> 0.52f; ui.isTablet -> 0.60f; else -> 0.86f }, 320f, 560f)
-        val panel = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
+        val panel = FrameLayout(context).apply {
             background = rounded(COLOR_PANEL, ui.dp(10f) * 1.8f)
-            setPadding(ui.dp(16f), ui.dp(14f), ui.dp(16f), ui.dp(14f))
         }
         addView(panel, LayoutParams(panelW, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        val scroll = ScrollView(context).apply {
+            isVerticalScrollBarEnabled = true
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            isFillViewport = true
+        }
+        val content = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(ui.dp(16f), ui.dp(14f), ui.dp(16f), ui.dp(14f))
+        }
+        scroll.addView(content, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT
+        ))
+        panel.addView(scroll, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT
+        ))
+        // 内容超出屏幕 86% 时限制面板高度, 由滚动条滑动查看剩余内容
+        panel.post {
+            val maxH = (resources.displayMetrics.heightPixels * 0.86f).toInt()
+            if (panel.height > maxH) {
+                panel.layoutParams.height = maxH
+                scroll.layoutParams.height = FrameLayout.LayoutParams.MATCH_PARENT
+                panel.requestLayout()
+            }
+        }
 
         // ---- 标题 ----
-        panel.addView(TextView(context).apply {
+        content.addView(TextView(context).apply {
             text = "设置"
             setTextColor(COLOR_SUB)
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ui.sp(11f))
@@ -98,7 +123,7 @@ class SettingsSheetView @JvmOverloads constructor(
             note = "默认关闭。手机上滑＝下一个台，电视按 ↓＝下一个台；开启后反转。"
         )
         toggleInvert = t1
-        panel.addView(rowInvert, LinearLayout.LayoutParams(
+        content.addView(rowInvert, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { bottomMargin = ui.dp(6f) })
         rowInvert.setOnClickListener {
@@ -106,30 +131,32 @@ class SettingsSheetView @JvmOverloads constructor(
             callback?.onInvertSwitchChanged(toggleInvert.checked)
         }
 
-        // ---- 项 2: 应用自动更新 ----
+        // ---- 项 2: 播放内核(点击弹窗选择) ----
+        val (rowKernel, valueView) = createValueRow(
+            title = "播放内核",
+            note = "默认系统内核；老设备(如 Android 6.0 老电视)可选腾讯 X5。切换后重启应用生效。"
+        )
+        kernelValue = valueView
+        kernelNote = rowKernel.findViewWithTag("note")
+            ?: throw IllegalStateException("kernel note view missing")
+        content.addView(rowKernel, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = ui.dp(6f) })
+        rowKernel.setOnClickListener { showKernelPicker() }
+
+        // ---- 项 3: 应用自动更新 ----
         val (rowAuto, t2) = createToggleRow(
             title = "应用自动更新",
             note = "启动时自动检测新版本，发现后提示更新。"
         )
         toggleAutoUpdate = t2
-        panel.addView(rowAuto, LinearLayout.LayoutParams(
+        content.addView(rowAuto, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { bottomMargin = ui.dp(2f) })
         rowAuto.setOnClickListener {
             toggleAutoUpdate.checked = !toggleAutoUpdate.checked
             callback?.onAutoUpdateChanged(toggleAutoUpdate.checked)
         }
-
-        // ---- 项 3: 播放内核(点击弹窗选择) ----
-        val (rowKernel, valueView) = createValueRow(
-            title = "播放内核",
-            note = "默认系统内核；老设备(如 Android 6.0 老电视)可选腾讯 X5。切换后重启应用生效。"
-        )
-        kernelValue = valueView
-        panel.addView(rowKernel, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { bottomMargin = ui.dp(2f) })
-        rowKernel.setOnClickListener { showKernelPicker() }
 
         // ---- 手动检查更新 ----
         val checkRow = TextView(context).apply {
@@ -146,10 +173,9 @@ class SettingsSheetView @JvmOverloads constructor(
                 (v as TextView).setTextColor(if (hasFocus) COLOR_FOCUS_TEXT else COLOR_ACCENT)
             }
         }
-        panel.addView(checkRow, LinearLayout.LayoutParams(
+        content.addView(checkRow, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = ui.dp(6f) })
-
         // ---- 内核选择弹窗(覆盖层, 默认隐藏) ----
         kernelOverlay = FrameLayout(context).apply {
             visibility = GONE
@@ -227,6 +253,7 @@ class SettingsSheetView @JvmOverloads constructor(
                 setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ui.sp(10f))
                 setLineSpacing(ui.sp(3f), 1f)
                 setPadding(0, ui.dp(4f), 0, 0)
+                tag = "note"
             }
             addView(noteView)
 
@@ -329,11 +356,14 @@ class SettingsSheetView @JvmOverloads constructor(
 
     // ---------------- 对外 API ----------------
 
-    fun open(invert: Boolean, autoUpdate: Boolean, kernel: Boolean = false) {
+    fun open(invert: Boolean, autoUpdate: Boolean, kernel: Boolean = false, kernelNoteText: String? = null) {
         toggleInvert.checked = invert
         toggleAutoUpdate.checked = autoUpdate
         kernelX5 = kernel
         updateKernelValue()
+        if (!kernelNoteText.isNullOrBlank()) {
+            kernelNote.text = kernelNoteText
+        }
         kernelOverlay.visibility = GONE
         visibility = VISIBLE
         if (ui.isTv) {
