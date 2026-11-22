@@ -200,7 +200,7 @@ class ChannelPlayerView @JvmOverloads constructor(
         if (switchCover.visibility != View.VISIBLE) return
         switchCover.animate()
             .alpha(0f)
-            .setDuration(250)
+            .setDuration(200)
             .withEndAction {
                 switchCover.visibility = View.GONE
                 switchCover.alpha = 1f

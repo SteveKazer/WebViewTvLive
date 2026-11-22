@@ -11,8 +11,8 @@ android {
         applicationId = "com.stevekazer.yangshiplive"
         minSdk = 21
         targetSdk = 34
-        versionCode = 31
-        versionName = "2.4.4-yangshipin"
+        versionCode = 32
+        versionName = "2.4.5-yangshipin"
     }
 
     signingConfigs {
