@@ -15,6 +15,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.TextView
 import com.vasthread.webviewtv.R
 import com.vasthread.webviewtv.misc.WebKernel
 
@@ -134,6 +135,9 @@ class ChannelPlayerView @JvmOverloads constructor(
         }
         LayoutInflater.from(context).inflate(R.layout.widget_channel_player, this)
         setBackgroundColor(Color.BLACK)
+        // 启动加载画面显示当前内核(常驻小字, 加载多久显示多久)
+        findViewById<TextView>(R.id.tvKernel).text =
+            if (WebKernel.isX5(context)) "当前内核：腾讯 X5" else "当前内核：系统 WebView"
         // v2.4.6 双内核: 按设置创建系统 WebView 或腾讯 X5 实例
         val host = findViewById<FrameLayout>(R.id.webViewHost)
         val wv: LiveWebView = if (WebKernel.isX5(context)) {

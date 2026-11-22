@@ -70,8 +70,6 @@ class MainActivity : AppCompatActivity() {
 	private var invertSwitch = false
 	private var autoUpdate = true
 	private var scriptToastShown = false
-	private var kernelToastShown = false
-	private var kernelToastAt = 0L
 	private var lastBackAt = 0L
 
 	private val digitBuffer = StringBuilder()
@@ -165,9 +163,8 @@ class MainActivity : AppCompatActivity() {
 		playerView.onScriptReady = {
 			if (!scriptToastShown) {
 				scriptToastShown = true
-				// 确保启动内核提示先显示(间隔不足 1.5s 时延后"已连接央视频")
-				val wait = (kernelToastAt + 1500 - System.currentTimeMillis()).coerceAtLeast(0L)
-				mainLayout.postDelayed({ toast("已连接央视频") }, wait)
+				// 内核信息合并在这里一次性告知(不在启动黑屏期单独弹 toast)
+				toast("已连接央视频 · ${kernelShortText()}")
 			}
 		}
 		playerView.onChannelsDetected = { json ->
@@ -264,17 +261,14 @@ class MainActivity : AppCompatActivity() {
 		}
 	}
 
-	/** 当前启动真正使用的内核文案(启动提示用) */
-	private fun currentKernelText(): String {
-		if (!WebKernel.isX5(this)) {
-			return "当前使用：系统内核"
-		}
+	/** 当前内核短文案(合并进"已连接央视频"提示) */
+	private fun kernelShortText(): String {
+		if (!WebKernel.isX5(this)) return "系统内核"
 		val ver = x5VersionOrZero()
-		val verText = if (ver > 0) "（v$ver）" else ""
 		return when {
-			WebKernel.x5Ready -> "当前使用：腾讯 X5 内核$verText"
-			ver > 0 -> "当前使用：系统内核（腾讯 X5$verText 准备中）"
-			else -> "当前使用：系统内核（腾讯 X5 内核下载中）"
+			WebKernel.x5Ready -> if (ver > 0) "腾讯 X5 v$ver" else "腾讯 X5"
+			ver > 0 -> "腾讯 X5 v$ver 准备中"
+			else -> "腾讯 X5 准备中"
 		}
 	}
 
@@ -427,14 +421,6 @@ class MainActivity : AppCompatActivity() {
 		startPlayerIfNeeded()
 		playerView.playVideo()
 		playerView.requestFocus()
-		// 启动时先告知当前使用的播放内核(在"已连接央视频"之前)
-		if (!kernelToastShown) {
-			kernelToastShown = true
-			mainLayout.postDelayed({
-				kernelToastAt = System.currentTimeMillis()
-				toast(currentKernelText())
-			}, 600)
-		}
 	}
 
 	override fun onPause() {
