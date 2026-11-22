@@ -11,7 +11,6 @@ import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.webkit.JavascriptInterface
-import android.webkit.ValueCallback
 import android.widget.FrameLayout
 import com.tencent.smtt.export.external.interfaces.ConsoleMessage
 import com.tencent.smtt.export.external.interfaces.IX5WebChromeClient
@@ -22,6 +21,7 @@ import com.tencent.smtt.export.external.interfaces.SslErrorHandler
 import com.tencent.smtt.export.external.interfaces.WebResourceRequest
 import com.tencent.smtt.export.external.interfaces.WebResourceResponse
 import com.tencent.smtt.sdk.WebChromeClient
+import com.tencent.smtt.sdk.ValueCallback
 import com.tencent.smtt.sdk.WebSettings
 import com.tencent.smtt.sdk.WebView
 import com.tencent.smtt.sdk.WebViewClient
@@ -257,25 +257,25 @@ class X5WebpageAdapterWebView @JvmOverloads constructor(
 
     override fun loadLiveUrl(url: String) = loadUrl(url)
 
-    override fun evaluate(js: String, callback: ((String) -> Unit)? = null) {
+    override fun evaluate(js: String, callback: ((String) -> Unit)?) {
         post { evaluateJavascript(js, ValueCallback { value -> callback?.invoke(value) }) }
     }
 
     override fun switchChannel(name: String, resumeQuality: String) {
-        evaluate("window.__WVT__ && __WVT__.switchChannel('${name.escapeJs()}', '${resumeQuality.escapeJs()}')")
+        evaluate("window.__WVT__ && __WVT__.switchChannel('${name.escapeJs()}', '${resumeQuality.escapeJs()}')", null)
     }
 
     override fun setQuality(qualityLabel: String) {
-        evaluate("window.__WVT__ && __WVT__.setQuality('${qualityLabel.escapeJs()}')")
+        evaluate("window.__WVT__ && __WVT__.setQuality('${qualityLabel.escapeJs()}')", null)
     }
 
     override fun restore(channel: String, quality: String) {
-        evaluate("window.__WVT__ && __WVT__.restore('${channel.escapeJs()}','${quality.escapeJs()}')")
+        evaluate("window.__WVT__ && __WVT__.restore('${channel.escapeJs()}','${quality.escapeJs()}')", null)
     }
 
-    override fun pauseVideo() = evaluate("window.__WVT__ && __WVT__.pause()")
+    override fun pauseVideo() = evaluate("window.__WVT__ && __WVT__.pause()", null)
 
-    override fun playVideo() = evaluate("window.__WVT__ && __WVT__.play()")
+    override fun playVideo() = evaluate("window.__WVT__ && __WVT__.play()", null)
 
     // ---------------- JS -> 原生 ----------------
 

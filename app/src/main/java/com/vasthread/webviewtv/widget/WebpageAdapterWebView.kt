@@ -269,28 +269,28 @@ class WebpageAdapterWebView @JvmOverloads constructor(
     /** 加载播放页(LiveWebView 接口方法) */
     override fun loadLiveUrl(url: String) = loadUrl(url)
 
-    override fun evaluate(js: String, callback: ((String) -> Unit)? = null) {
+    override fun evaluate(js: String, callback: ((String) -> Unit)?) {
         post { evaluateJavascript(js) { value -> callback?.invoke(value) } }
     }
 
     /** 换台: 隐藏鼠标点击页面频道按钮; resumeQuality=换台后跟随恢复的清晰度(页面切台会重置回蓝光) */
     override fun switchChannel(name: String, resumeQuality: String) {
-        evaluate("window.__WVT__ && __WVT__.switchChannel('${name.escapeJs()}', '${resumeQuality.escapeJs()}')")
+        evaluate("window.__WVT__ && __WVT__.switchChannel('${name.escapeJs()}', '${resumeQuality.escapeJs()}')", null)
     }
 
     /** 设置清晰度: 点击页面隐藏的清晰度菜单项 */
     override fun setQuality(qualityLabel: String) {
-        evaluate("window.__WVT__ && __WVT__.setQuality('${qualityLabel.escapeJs()}')")
+        evaluate("window.__WVT__ && __WVT__.setQuality('${qualityLabel.escapeJs()}')", null)
     }
 
     /** 启动恢复: 切换到上次频道+上次清晰度 */
     override fun restore(channel: String, quality: String) {
-        evaluate("window.__WVT__ && __WVT__.restore('${channel.escapeJs()}','${quality.escapeJs()}')")
+        evaluate("window.__WVT__ && __WVT__.restore('${channel.escapeJs()}','${quality.escapeJs()}')", null)
     }
 
-    override fun pauseVideo() = evaluate("window.__WVT__ && __WVT__.pause()")
+    override fun pauseVideo() = evaluate("window.__WVT__ && __WVT__.pause()", null)
 
-    override fun playVideo() = evaluate("window.__WVT__ && __WVT__.play()")
+    override fun playVideo() = evaluate("window.__WVT__ && __WVT__.play()", null)
 
     // ---------------- JS -> 原生 ----------------
 
