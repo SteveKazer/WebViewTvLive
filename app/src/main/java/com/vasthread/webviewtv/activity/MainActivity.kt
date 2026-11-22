@@ -12,6 +12,7 @@ import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.vasthread.webviewtv.R
+import com.vasthread.webviewtv.misc.WebKernel
 import com.vasthread.webviewtv.misc.preference
 import com.vasthread.webviewtv.playlist.Channels
 import com.vasthread.webviewtv.playlist.Channels.Channel
@@ -100,7 +101,7 @@ class MainActivity : AppCompatActivity() {
 				UiMode.SETTINGS -> {
 					channelSheet.visibility = View.GONE
 					qualitySheet.visibility = View.GONE
-					settingsSheet.open(invertSwitch, autoUpdate)
+					settingsSheet.open(invertSwitch, autoUpdate, WebKernel.isX5(this))
 					repostCloseAction()
 				}
 				UiMode.STANDARD -> {
@@ -178,6 +179,14 @@ class MainActivity : AppCompatActivity() {
 			// 首帧就绪后延迟检查更新, 不打断观赏(需开启自动更新)
 			mainLayout.postDelayed({ if (autoUpdate) updateManager.checkAndPrompt() }, 5000)
 		}
+		// 版权限制: 播放器已自动揭幕显示页面版权界面, 这里给个简短提示
+		playerView.onCopyrightBlocked = {
+			toast("该节目受版权限制，可换台观看")
+		}
+		// 播放卡顿: 底部提示用户尝试更换清晰度(JS 侧已限制频率)
+		playerView.onPlaybackStutter = {
+			toast("画面卡顿？可在清晰度里换一档试试")
+		}
 		channelSheet.callback = object : ChannelSheetView.Callback {
 			override fun onChannelSelected(name: String, tab: Int) {
 				activeTab = tab
@@ -220,10 +229,15 @@ class MainActivity : AppCompatActivity() {
 				toast(if (enabled) "已开启自动更新" else "已关闭自动更新")
 			}
 
-			override fun onCheckUpdateClick() {
+				override fun onCheckUpdateClick() {
 				updateManager.checkManual()
 			}
-		}
+
+				override fun onKernelChanged(x5: Boolean) {
+				WebKernel.setX5(this@MainActivity, x5)
+				toast(if (x5) "已选择腾讯 X5 内核，重启应用后生效（首次需联网下载内核）" else "已选择系统内核，重启应用后生效")
+			}
+			}
 		settingsSheet.onDismissCallback = { uiMode = UiMode.STANDARD }
 	}
 
@@ -453,10 +467,10 @@ class MainActivity : AppCompatActivity() {
 			return super.dispatchKeyEvent(event)
 		}
 
-		// 设置弹窗打开: BACK 关闭, 其余交由焦点导航(上下键移动行, OK 切换开关)
+		// 设置弹窗打开: BACK 关闭(内核选择层打开时先关它), 其余交由焦点导航
 		if (uiMode == UiMode.SETTINGS && settingsSheet.visibility == View.VISIBLE) {
 			if (keyCode == KeyEvent.KEYCODE_BACK && isActionUp) {
-				settingsSheet.dismiss()
+				if (!settingsSheet.handleBack()) settingsSheet.dismiss()
 				return true
 			}
 			return super.dispatchKeyEvent(event)

@@ -48,14 +48,11 @@ typealias LP = FrameLayout.LayoutParams
 @SuppressLint("SetJavaScriptEnabled")
 class WebpageAdapterWebView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
-) : WebView(context, attrs, defStyleAttr) {
+) : WebView(context, attrs, defStyleAttr), LiveWebView {
 
     companion object {
         private const val TAG = "WebpageAdapterWebView"
         const val URL_BLANK = "about:blank"
-
-        /** 唯一播放页: 全程只用一个标签页 */
-        const val URL_HOME = "https://www.yangshipin.cn/tv/home"
 
         private const val PC_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
@@ -77,27 +74,31 @@ class WebpageAdapterWebView @JvmOverloads constructor(
     private var scriptReady = false
     private val loadingInfo = PageLoadingInfo("", false)
 
-    lateinit var fullscreenContainer: FrameLayout
+    override lateinit var fullscreenContainer: FrameLayout
 
     /** 页面脚本注入完成 */
-    var onScriptReady: (() -> Unit)? = null
+    override var onScriptReady: (() -> Unit)? = null
 
     /** 首帧就绪(视频起播且沉浸式样式已应用) */
-    var onFirstFrame: (() -> Unit)? = null
+    override var onFirstFrame: (() -> Unit)? = null
 
     /** 页面加载完成(每次进度 100) */
-    var onPageReady: (() -> Unit)? = null
+    override var onPageReady: (() -> Unit)? = null
 
     /** 页面频道检测上报(注入脚本扫描页面频道 pill 后回调) */
-    var onChannelsDetected: ((String) -> Unit)? = null
+    override var onChannelsDetected: ((String) -> Unit)? = null
 
     /** JS 发起的切流开始(看门狗自动降档等), 提示上层盖切流遮罩 */
-    var onStreamSwitchBegin: (() -> Unit)? = null
+    override var onStreamSwitchBegin: (() -> Unit)? = null
 
     /** 每次切流后视频真正恢复播放(rs>=3 且未暂停), 提示上层揭幕 */
-    var onPlaybackResumed: (() -> Unit)? = null
+    override var onPlaybackResumed: (() -> Unit)? = null
 
-    fun interface JsCallback { fun onResult(result: String) }
+    /** 页面出现版权限制提示(应版权方要求等), 上层立即揭幕展示版权界面 */
+    override var onCopyrightBlocked: (() -> Unit)? = null
+
+    /** 播放卡顿(持续缓冲中), 提示用户尝试更换清晰度 */
+    override var onPlaybackStutter: (() -> Unit)? = null
 
     private val client = object : WebViewClient() {
 
@@ -265,28 +266,31 @@ class WebpageAdapterWebView @JvmOverloads constructor(
 
     fun isInFullscreen() = isInFullscreen
 
-    fun evaluate(js: String, callback: JsCallback? = null) {
-        post { evaluateJavascript(js) { value -> callback?.onResult(value) } }
+    /** 加载播放页(LiveWebView 接口方法) */
+    override fun loadLiveUrl(url: String) = loadUrl(url)
+
+    override fun evaluate(js: String, callback: ((String) -> Unit)?) {
+        post { evaluateJavascript(js) { value -> callback?.invoke(value) } }
     }
 
     /** 换台: 隐藏鼠标点击页面频道按钮; resumeQuality=换台后跟随恢复的清晰度(页面切台会重置回蓝光) */
-    fun switchChannel(name: String, resumeQuality: String = "") {
-        evaluate("window.__WVT__ && __WVT__.switchChannel('${name.escapeJs()}', '${resumeQuality.escapeJs()}')")
+    override fun switchChannel(name: String, resumeQuality: String) {
+        evaluate("window.__WVT__ && __WVT__.switchChannel('${name.escapeJs()}', '${resumeQuality.escapeJs()}')", null)
     }
 
     /** 设置清晰度: 点击页面隐藏的清晰度菜单项 */
-    fun setQuality(qualityLabel: String) {
-        evaluate("window.__WVT__ && __WVT__.setQuality('${qualityLabel.escapeJs()}')")
+    override fun setQuality(qualityLabel: String) {
+        evaluate("window.__WVT__ && __WVT__.setQuality('${qualityLabel.escapeJs()}')", null)
     }
 
     /** 启动恢复: 切换到上次频道+上次清晰度 */
-    fun restore(channel: String, quality: String) {
-        evaluate("window.__WVT__ && __WVT__.restore('${channel.escapeJs()}','${quality.escapeJs()}')")
+    override fun restore(channel: String, quality: String) {
+        evaluate("window.__WVT__ && __WVT__.restore('${channel.escapeJs()}','${quality.escapeJs()}')", null)
     }
 
-    fun pauseVideo() = evaluate("window.__WVT__ && __WVT__.pause()")
+    override fun pauseVideo() = evaluate("window.__WVT__ && __WVT__.pause()", null)
 
-    fun playVideo() = evaluate("window.__WVT__ && __WVT__.play()")
+    override fun playVideo() = evaluate("window.__WVT__ && __WVT__.play()", null)
 
     // ---------------- JS -> 原生 ----------------
 
@@ -319,6 +323,18 @@ class WebpageAdapterWebView @JvmOverloads constructor(
     @JavascriptInterface
     fun notifyPlaybackResumed() {
         post { onPlaybackResumed?.invoke() }
+    }
+
+    /** 页面出现版权限制提示: 立即揭幕展示版权界面 */
+    @JavascriptInterface
+    fun notifyCopyrightBlocked() {
+        post { onCopyrightBlocked?.invoke() }
+    }
+
+    /** 播放持续卡顿(缓冲中): 提示用户更换清晰度 */
+    @JavascriptInterface
+    fun notifyStutter() {
+        post { onPlaybackStutter?.invoke() }
     }
 
     @JavascriptInterface

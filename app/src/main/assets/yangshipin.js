@@ -1,7 +1,7 @@
 // =====================================================================
 // 央视频TV 注入脚本 (注入到 https://www.yangshipin.cn/tv/home)
 // ---------------------------------------------------------------------
-// 核心思想: 只打开一个标签页, 沉浸式播放。(v2.4.5 系统 WebView/Chromium 版)
+// 核心思想: 只打开一个标签页, 沉浸式播放。(v2.4.6 双内核版: 系统 WebView / 腾讯 X5)
 //
 // 沉浸式方案(已实测):
 //   页面自身的"全屏"按钮在部分设备上不可靠, 因此改为注入 CSS:
@@ -33,6 +33,17 @@
 // 切台自愈:
 //   切台后 12 秒仍无有效画面时自动重试点击频道
 //   (相当于"切其他台再切回来"), 最多两次; 重试时黑幕持续盖住。
+//   页面出现版权限制提示时自愈停止(重试无法救活受限节目)。
+//
+// 版权限制直出(v2.4.6):
+//   部分节目因版权限制无法播放, 页面会渲染 .loading1 .txt-b
+//   (如"应版权方要求, 暂停提供直播信号")。检测到该结构且文本
+//   含 版权/限制/变更 等关键词时, 立即 notifyCopyrightBlocked()
+//   让原生揭幕显示版权界面, 不再无限卡在"正在切换…"。
+//
+// 卡顿提示(v2.4.6):
+//   播放中持续缓冲(readyState<3)超过 4 秒且距上次提示 >60 秒时,
+//   notifyStutter() 原生底部提示用户尝试更换清晰度。
 //
 // 视频隐藏器:
 //   视频 paused/无数据或换台/切清晰度瞬间(在动作第一行)直接把 video 元素
@@ -124,6 +135,13 @@
 		} catch (e) { /* ignore */ }
 	}
 
+	// 页面出现版权限制提示: 通知原生立即揭幕, 展示页面版权界面
+	function notifyCopyrightBlocked() {
+		try {
+			if (window.main && typeof window.main.notifyCopyrightBlocked === 'function') { window.main.notifyCopyrightBlocked(); }
+		} catch (e) { /* ignore */ }
+	}
+
 	// 调用原生盖切流黑幕并隐藏/静音视频表面(切流动作统一入口)
 	// 静音: 旧台声音立即消失; 揭幕(画面确认)时才解除 —— 声画同步
 	function beginStreamSwitch(videoEl) {
@@ -165,6 +183,8 @@
 				return true;
 			}
 			pendingSeek = 0;             // 换台: 位置恢复无意义
+			copyrightSeen = false;       // 换台: 重置版权标记
+			copyrightIgnoreUntil = Date.now() + 3000; // 换台后 3s 内不检测版权
 			pendingFollowQuality = resumeQuality ? norm(resumeQuality) : ''; // 页面切台会重置回蓝光
 			retryTarget = name;          // 自愈重试目标
 			retryAt = Date.now();
@@ -344,6 +364,38 @@
 	var retryTarget = '';
 	var retryAt = 0;
 	var retryCount = 0;
+	// 版权限制: 命中页面版权提示后置 true, 停止自愈重试
+	var copyrightSeen = false;
+	// 换台后短暂静默版权检测(等新台 DOM 渲染, 避免旧提示误报)
+	var copyrightIgnoreUntil = 0;
+
+	// 版权限制检测: 页面 .loading1 .txt-b 文本含 版权/限制/变更 即命中。
+	// 命中后立即通知原生揭幕(展示版权界面), 并终止换台自愈重试。
+	function watchCopyright() {
+		try {
+			if (Date.now() < copyrightIgnoreUntil) {
+				setTimeout(watchCopyright, 1000);
+				return;
+			}
+			var t = q('.loading1 .txt-b');
+			if (t) {
+				var txt = (t.textContent || '').trim();
+				if (/(版权|限制|变更)/.test(txt)) {
+					if (!copyrightSeen) {
+						copyrightSeen = true;
+						retryTarget = '';    // 版权节目重试无法救活, 停止自愈
+						switchMuted = false; // 版权节目无音源, 清除切流静音标记
+						notifyCopyrightBlocked();
+						log('copyright blocked: ' + txt);
+					}
+					setTimeout(watchCopyright, 1000);
+					return;
+				}
+			}
+			copyrightSeen = false;
+		} catch (e) { /* ignore */ }
+		setTimeout(watchCopyright, 1000);
+	}
 
 	// 清晰度跟随提前点击: 页面切台会重置回蓝光; 等新台真正生效
 	// (tvSelect 变为新台, 避免旧台菜单未刷新的竞态)后比对清晰度,
@@ -397,6 +449,9 @@
 	//    (不自动降清晰度: v2.4.2 起按用户要求移除画质兜底)
 	var stallSince = Date.now();      // 本次卡住开始时间
 	var playingNotified = 0;          // 播放中且 loading 可见的采样起点(0=未见)
+	// 卡顿提示: 持续缓冲计时 + 上次提示时间(60 秒内不重复打扰)
+	var stutterSince = 0;
+	var lastStutterAt = 0;
 
 	function watchStall() {
 		try {
@@ -424,6 +479,20 @@
 			} else {
 				playingNotified = 0;
 			}
+
+			// 卡顿提示: 播放中持续缓冲 >4s 且距上次提示 >60s, 提示更换清晰度
+			// (切流中/清晰度跟随中/版权节目除外, 避免误报)
+			if (v && !v.paused && !switchMuted && !pendingFollowQuality && !copyrightSeen) {
+				if (v.readyState < 3) {
+					if (stutterSince === 0) { stutterSince = Date.now(); }
+					else if (Date.now() - stutterSince > 4000 && Date.now() - lastStutterAt > 60000) {
+						lastStutterAt = Date.now();
+						stutterSince = 0;
+						callNative('notifyStutter');
+						log('stutter: suggest lower quality');
+					}
+				} else { stutterSince = 0; }
+			} else { stutterSince = 0; }
 
 			// 换台自愈: 切台后 12s 仍无有效画面(rs<3 或无视频宽)时
 			// 自动重试点击频道(相当于"切其他台再切回来"), 最多两次;
@@ -476,12 +545,13 @@
 		setTimeout(watchDetect, 5000);
 	}
 
-	log('injected, yangshipin immersive edition v2.4.5 (chromium)');
+	log('injected, yangshipin immersive edition v2.4.6 (dual-kernel)');
 	injectImmersiveCss();
 	watchImmersive();
 	watchVideo();
 	watchStall();
 	watchVideoSurface();
 	watchDetect();
+	watchCopyright();
 	callNative('notifyScriptReady');
 })();

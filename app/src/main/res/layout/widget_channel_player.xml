@@ -4,8 +4,10 @@
 	android:layout_width="match_parent"
 	android:layout_height="match_parent">
 
-	<com.vasthread.webviewtv.widget.WebpageAdapterWebView
-		android:id="@+id/webView"
+	<!-- 播放内核容器: v2.4.6 双内核, 运行时按设置创建
+	     系统 WebView 或腾讯 X5 WebView 实例填入 -->
+	<FrameLayout
+		android:id="@+id/webViewHost"
 		android:layout_width="match_parent"
 		android:layout_height="match_parent" />
 

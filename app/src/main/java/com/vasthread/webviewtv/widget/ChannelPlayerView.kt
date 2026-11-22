@@ -16,6 +16,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import com.vasthread.webviewtv.R
+import com.vasthread.webviewtv.misc.WebKernel
 
 /**
  * 播放器视图: 启动遮罩 + 防误触遮罩 + 映射点击。
@@ -41,7 +42,9 @@ class ChannelPlayerView @JvmOverloads constructor(
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    val webView: WebpageAdapterWebView
+    /** 当前播放内核(系统 WebView / 腾讯 X5), 由设置决定 */
+    val webView: LiveWebView
+    private val webViewImpl: View
     private val fullscreenContainer: FrameLayout
     private val loadingOverlay: View
     private val switchCover: View
@@ -73,6 +76,12 @@ class ChannelPlayerView @JvmOverloads constructor(
 
     /** 每次切流后视频真正恢复播放(JS 判定 rs>=3 且未暂停) */
     var onPlaybackResumed: (() -> Unit)? = null
+
+    /** 页面出现版权限制提示(已自动揭幕, 供上层做额外提示) */
+    var onCopyrightBlocked: (() -> Unit)? = null
+
+    /** 播放持续卡顿, 上层底部提示用户更换清晰度 */
+    var onPlaybackStutter: (() -> Unit)? = null
 
     private var started = false
     private var firstFrame = false
@@ -125,11 +134,22 @@ class ChannelPlayerView @JvmOverloads constructor(
         }
         LayoutInflater.from(context).inflate(R.layout.widget_channel_player, this)
         setBackgroundColor(Color.BLACK)
-        webView = findViewById(R.id.webView)
+        // v2.4.6 双内核: 按设置创建系统 WebView 或腾讯 X5 实例
+        val host = findViewById<FrameLayout>(R.id.webViewHost)
+        val wv: LiveWebView = if (WebKernel.isX5(context)) {
+            X5WebpageAdapterWebView(context)
+        } else {
+            WebpageAdapterWebView(context)
+        }
+        webView = wv
+        webViewImpl = wv as View
+        host.addView(webViewImpl, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
+        ))
         fullscreenContainer = findViewById(R.id.fullscreenContainer)
         loadingOverlay = findViewById(R.id.loadingOverlay)
         switchCover = findViewById(R.id.switchCover)
-        webView.apply {
+        wv.apply {
             this.fullscreenContainer = this@ChannelPlayerView.fullscreenContainer
             onScriptReady = { this@ChannelPlayerView.onScriptReady?.invoke() }
             onPageReady = { this@ChannelPlayerView.onPageReady?.invoke() }
@@ -146,6 +166,18 @@ class ChannelPlayerView @JvmOverloads constructor(
                 this@ChannelPlayerView.hideSwitchCover()
                 this@ChannelPlayerView.onPlaybackResumed?.invoke()
             }
+            // 版权限制: 立即揭幕, 展示页面版权提示(direct show, 不等起播)
+            // 同时解开启动遮罩并放行手势(否则被盖住/无法唤起换台面板)
+            onCopyrightBlocked = {
+                mainHandler.removeCallbacks(hideSwitchCoverAction)
+                switchCover.animate().cancel()
+                switchCover.visibility = View.GONE
+                switchCover.alpha = 1f
+                this@ChannelPlayerView.firstFrame = true
+                this@ChannelPlayerView.hideLoading()
+                this@ChannelPlayerView.onCopyrightBlocked?.invoke()
+            }
+            onPlaybackStutter = { this@ChannelPlayerView.onPlaybackStutter?.invoke() }
         }
     }
 
@@ -154,7 +186,7 @@ class ChannelPlayerView @JvmOverloads constructor(
         if (started) return
         started = true
         showLoading()
-        webView.loadUrl(WebpageAdapterWebView.URL_HOME)
+        webView.loadLiveUrl(LiveWebView.URL_HOME)
     }
 
     /** 显示启动遮罩 */
@@ -227,7 +259,7 @@ class ChannelPlayerView @JvmOverloads constructor(
     fun playVideo() = webView.playVideo()
 
     override fun requestFocus(direction: Int, previouslyFocusedRect: Rect?): Boolean {
-        return webView.requestFocus(direction, previouslyFocusedRect)
+        return webViewImpl.requestFocus(direction, previouslyFocusedRect)
     }
 
     /** 遮罩: 触摸一律不透传 */

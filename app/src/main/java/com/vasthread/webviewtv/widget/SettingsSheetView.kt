@@ -19,9 +19,10 @@ import com.vasthread.webviewtv.misc.UiScale
 /**
  * 设置弹窗(居中面板, 不占满屏)。
  *
- * 目前两项设置:
+ * 目前三项设置:
  *   1. 上下按键切换: 开关。开启=反转(手机上滑/电视按下键 改为切上一个台)
  *   2. 应用自动更新: 开关(启动时自动检测新版本) + 手动"立即检查更新"
+ *   3. 播放内核: 点击弹窗选择(系统内核 / 腾讯 X5), 重启应用后生效
  *
  * 视觉与频道/清晰度面板完全一致: 影院深色面板 + 琥珀强调 + 焦点黄底黑字。
  * 手机触摸切换; 电视十字键导航 + OK 切换 + BACK 关闭。
@@ -47,6 +48,8 @@ class SettingsSheetView @JvmOverloads constructor(
         fun onAutoUpdateChanged(enabled: Boolean)
         /** 点击"立即检查更新" */
         fun onCheckUpdateClick()
+        /** 切换播放内核(true=X5, false=系统) */
+        fun onKernelChanged(x5: Boolean)
     }
 
     private val ui: UiScale = UiScale(context)
@@ -56,6 +59,10 @@ class SettingsSheetView @JvmOverloads constructor(
 
     private val toggleInvert: ToggleView
     private val toggleAutoUpdate: ToggleView
+    private val kernelValue: TextView
+    private val kernelOverlay: FrameLayout
+    private val kernelOptions = mutableListOf<LinearLayout>()
+    private var kernelX5 = false
 
     init {
         isClickable = true
@@ -113,6 +120,17 @@ class SettingsSheetView @JvmOverloads constructor(
             callback?.onAutoUpdateChanged(toggleAutoUpdate.checked)
         }
 
+        // ---- 项 3: 播放内核(点击弹窗选择) ----
+        val (rowKernel, valueView) = createValueRow(
+            title = "播放内核",
+            note = "默认系统内核；老设备(如 Android 6.0 老电视)可选腾讯 X5。切换后重启应用生效。"
+        )
+        kernelValue = valueView
+        panel.addView(rowKernel, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = ui.dp(2f) })
+        rowKernel.setOnClickListener { showKernelPicker() }
+
         // ---- 手动检查更新 ----
         val checkRow = TextView(context).apply {
             text = "立即检查更新"
@@ -131,8 +149,134 @@ class SettingsSheetView @JvmOverloads constructor(
         panel.addView(checkRow, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = ui.dp(6f) })
+
+        // ---- 内核选择弹窗(覆盖层, 默认隐藏) ----
+        kernelOverlay = FrameLayout(context).apply {
+            visibility = GONE
+            isClickable = true
+        }
+        addView(kernelOverlay, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        kernelOverlay.addView(View(context).apply {
+            setBackgroundColor(COLOR_DIM)
+            setOnClickListener { closeKernelPicker() }
+        }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        val pickerPanel = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(COLOR_PANEL, ui.dp(10f) * 1.8f)
+            setPadding(ui.dp(16f), ui.dp(14f), ui.dp(16f), ui.dp(14f))
+            isClickable = true
+        }
+        kernelOverlay.addView(pickerPanel, FrameLayout.LayoutParams(panelW, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        pickerPanel.addView(TextView(context).apply {
+            text = "选择播放内核"
+            setTextColor(COLOR_SUB)
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ui.sp(11f))
+            letterSpacing = 0.08f
+            setPadding(ui.dp(4f), 0, 0, ui.dp(10f))
+        })
+        val optSystem = createKernelOption(
+            title = "系统内核（WebView）",
+            note = "默认。系统自带 Chromium 内核，无需下载，推荐新设备使用。"
+        ) { selectKernel(false) }
+        kernelOptions.add(optSystem)
+        pickerPanel.addView(optSystem, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = ui.dp(6f) })
+        val optX5 = createKernelOption(
+            title = "腾讯 X5 内核",
+            note = "适用于系统内核过旧的老设备（如 Android 6.0 老电视）。首次使用需联网自动下载内核，下载完成后重启生效。"
+        ) { selectKernel(true) }
+        kernelOptions.add(optX5)
+        pickerPanel.addView(optX5, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
     }
 
+    /** 构建"标题 + 右侧当前值"的可聚焦设置行; 焦点态文字变黑 */
+    private fun createValueRow(title: String, note: String): Pair<LinearLayout, TextView> {
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            isFocusable = true
+            isClickable = true
+            background = itemBackground(ui.dp(5f) * 1.6f)
+            setPadding(ui.dp(10f), ui.dp(9f), ui.dp(10f), ui.dp(9f))
+
+            val header = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val titleView = TextView(context).apply {
+                text = title
+                setTextColor(COLOR_TEXT)
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ui.sp(14f))
+            }
+            val valueView = TextView(context).apply {
+                text = ""
+                setTextColor(COLOR_ACCENT)
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ui.sp(12f))
+                setPadding(ui.dp(10f), 0, 0, 0)
+                tag = "value"
+            }
+            header.addView(titleView, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            header.addView(valueView)
+            addView(header)
+
+            val noteView = TextView(context).apply {
+                text = note
+                setTextColor(COLOR_MUTED)
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ui.sp(10f))
+                setLineSpacing(ui.sp(3f), 1f)
+                setPadding(0, ui.dp(4f), 0, 0)
+            }
+            addView(noteView)
+
+            setOnFocusChangeListener { _, hasFocus ->
+                titleView.setTextColor(if (hasFocus) COLOR_FOCUS_TEXT else COLOR_TEXT)
+                noteView.setTextColor(if (hasFocus) COLOR_FOCUS_TEXT else COLOR_MUTED)
+                valueView.setTextColor(if (hasFocus) COLOR_FOCUS_TEXT else COLOR_ACCENT)
+            }
+        }
+        return row to (row.findViewWithTag<TextView>("value") ?: valueViewIn(row))
+    }
+
+    private fun valueViewIn(row: LinearLayout): TextView {
+        // 第二行标题里的右侧值 TextView
+        val header = row.getChildAt(0) as LinearLayout
+        return header.getChildAt(1) as TextView
+    }
+
+    /** 构建内核选择项行 */
+    private fun createKernelOption(title: String, note: String, onClick: () -> Unit): LinearLayout {
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            isFocusable = true
+            isClickable = true
+            background = itemBackground(ui.dp(5f) * 1.6f)
+            setPadding(ui.dp(10f), ui.dp(9f), ui.dp(10f), ui.dp(9f))
+
+            val titleView = TextView(context).apply {
+                text = title
+                setTextColor(COLOR_TEXT)
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ui.sp(14f))
+            }
+            addView(titleView)
+            val noteView = TextView(context).apply {
+                text = note
+                setTextColor(COLOR_MUTED)
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ui.sp(10f))
+                setLineSpacing(ui.sp(3f), 1f)
+                setPadding(0, ui.dp(4f), 0, 0)
+            }
+            addView(noteView)
+
+            setOnFocusChangeListener { _, hasFocus ->
+                titleView.setTextColor(if (hasFocus) COLOR_FOCUS_TEXT else COLOR_TEXT)
+                noteView.setTextColor(if (hasFocus) COLOR_FOCUS_TEXT else COLOR_MUTED)
+            }
+            setOnClickListener { onClick() }
+        }
+        return row
+    }
     /** 构建"标题 + 开关 + 小字备注"的可聚焦设置行; 焦点态文字变黑 */
     private fun createToggleRow(title: String, note: String): Pair<LinearLayout, ToggleView> {
         val row = LinearLayout(context).apply {
@@ -185,17 +329,57 @@ class SettingsSheetView @JvmOverloads constructor(
 
     // ---------------- 对外 API ----------------
 
-    fun open(invert: Boolean, autoUpdate: Boolean) {
+    fun open(invert: Boolean, autoUpdate: Boolean, kernel: Boolean = false) {
         toggleInvert.checked = invert
         toggleAutoUpdate.checked = autoUpdate
+        kernelX5 = kernel
+        updateKernelValue()
+        kernelOverlay.visibility = GONE
         visibility = VISIBLE
         if (ui.isTv) {
             post { findFocusable(this)?.requestFocus() }
         }
     }
 
+    /** 返回键处理: 内核选择层打开时先关闭它(返回 true 表示已消费) */
+    fun handleBack(): Boolean {
+        if (kernelOverlay.visibility == VISIBLE) {
+            closeKernelPicker()
+            return true
+        }
+        return false
+    }
+
+    private fun updateKernelValue() {
+        kernelValue.text = if (kernelX5) "腾讯 X5" else "系统内核"
+    }
+
+    private fun showKernelPicker() {
+        updateKernelValue()
+        kernelOverlay.visibility = VISIBLE
+        if (ui.isTv) {
+            val target = kernelOptions.getOrNull(if (kernelX5) 1 else 0) ?: kernelOptions.firstOrNull()
+            post { target?.requestFocus() }
+        }
+    }
+
+    private fun closeKernelPicker() {
+        kernelOverlay.visibility = GONE
+        if (ui.isTv) {
+            post { findFocusable(this)?.requestFocus() }
+        }
+    }
+
+    private fun selectKernel(x5: Boolean) {
+        kernelX5 = x5
+        updateKernelValue()
+        closeKernelPicker()
+        callback?.onKernelChanged(x5)
+    }
+
     private fun findFocusable(parent: View): View? {
-        if (parent.isFocusable && parent.visibility == VISIBLE) return parent
+        if (parent.visibility != View.VISIBLE) return null
+        if (parent.isFocusable) return parent
         if (parent is android.view.ViewGroup) {
             for (i in 0 until parent.childCount) {
                 findFocusable(parent.getChildAt(i))?.let { return it }
