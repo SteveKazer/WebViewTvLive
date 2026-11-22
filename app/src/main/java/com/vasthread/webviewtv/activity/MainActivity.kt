@@ -259,7 +259,7 @@ class MainActivity : AppCompatActivity() {
 			WebKernel.x5ErrorCode >= 0 ->
 				"腾讯 X5 内核下载失败（错误码 ${WebKernel.x5ErrorCode}），请检查网络后重启应用重试。"
 			ver > 0 -> "腾讯 X5 内核已安装（v$ver），重启应用后生效。"
-			else -> "腾讯 X5 内核尚未开始下载：请保持联网（已允许 Wi-Fi/网线），不要频繁退出或重启，等待后台下载完成。"
+			else -> "腾讯 X5 内核未下载（腾讯 TBS 下载服务当前常不可用）。当前使用系统内核，不影响播放。"
 		}
 	}
 

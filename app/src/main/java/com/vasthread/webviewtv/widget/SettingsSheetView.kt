@@ -210,7 +210,7 @@ class SettingsSheetView @JvmOverloads constructor(
         ).apply { bottomMargin = ui.dp(6f) })
         val optX5 = createKernelOption(
             title = "腾讯 X5 内核",
-            note = "适用于系统内核过旧的老设备（如 Android 6.0 老电视）。首次使用需联网自动下载内核，下载完成后重启生效。"
+            note = "适用于系统内核过旧的老设备（如 Android 6.0 老电视）。内核需联网由腾讯服务器下载；该服务近年已不稳定（官方下载通道常返回 503），长时间无进度请用系统内核。"
         ) { selectKernel(true) }
         kernelOptions.add(optX5)
         pickerPanel.addView(optX5, LinearLayout.LayoutParams(
