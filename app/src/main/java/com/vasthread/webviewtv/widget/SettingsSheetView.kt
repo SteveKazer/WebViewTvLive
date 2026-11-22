@@ -2,6 +2,7 @@ package com.vasthread.webviewtv.widget
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -15,6 +16,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.vasthread.webviewtv.activity.TbsDebugActivity
 import com.vasthread.webviewtv.misc.UiScale
 
 /**
@@ -63,6 +65,7 @@ class SettingsSheetView @JvmOverloads constructor(
     private val kernelValue: TextView
     private val kernelNote: TextView
     private val kernelOverlay: FrameLayout
+    private lateinit var kernelRowRef: TextView
     private val kernelOptions = mutableListOf<LinearLayout>()
     private var kernelX5 = false
 
@@ -176,6 +179,23 @@ class SettingsSheetView @JvmOverloads constructor(
         content.addView(checkRow, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = ui.dp(6f) })
+
+        // ---- TBS 内核管理(仅选 X5 时显示; 用腾讯官方调试页手动装内核) ----
+        val tbsRow = TextView(context).apply {
+            text = "TBS 内核管理（腾讯官方页） ›"
+            setTextColor(0xFF7A8496.toInt())
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ui.sp(11f))
+            gravity = Gravity.CENTER
+            setPadding(0, ui.dp(9f), 0, 0)
+            setOnClickListener {
+                context.startActivity(Intent(context, TbsDebugActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+        }
+        content.addView(tbsRow, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
+        tbsRow.visibility = GONE
+        kernelRowRef = tbsRow
         // ---- 内核选择弹窗(覆盖层, 默认隐藏) ----
         kernelOverlay = FrameLayout(context).apply {
             visibility = GONE
@@ -364,6 +384,8 @@ class SettingsSheetView @JvmOverloads constructor(
         if (!kernelNoteText.isNullOrBlank()) {
             kernelNote.text = kernelNoteText
         }
+        // TBS 管理入口仅在选择腾讯 X5 时显示
+        kernelRowRef.visibility = if (kernel) VISIBLE else GONE
         kernelOverlay.visibility = GONE
         visibility = VISIBLE
         if (ui.isTv) {

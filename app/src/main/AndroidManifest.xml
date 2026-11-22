@@ -31,6 +31,12 @@
 			</intent-filter>
 		</activity>
 
+		<!-- 腾讯 X5 内核调试/管理页(原仓库 3.0.1 同款) -->
+		<activity
+			android:name=".activity.TbsDebugActivity"
+			android:screenOrientation="sensorLandscape"
+			android:theme="@style/FullscreenTheme" />
+
 		<provider
 			android:name="androidx.core.content.FileProvider"
 			android:authorities="${applicationId}.fileprovider"
