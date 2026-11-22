@@ -22,10 +22,11 @@ import com.vasthread.webviewtv.misc.UiScale
 /**
  * 设置弹窗(居中面板, 不占满屏)。
  *
- * 目前三项设置:
+ * 目前三部分设置:
  *   1. 上下按键切换: 开关。开启=反转(手机上滑/电视按下键 改为切上一个台)
- *   2. 应用自动更新: 开关(启动时自动检测新版本) + 手动"立即检查更新"
- *   3. 播放内核: 点击弹窗选择(系统内核 / 腾讯 X5), 重启应用后生效
+ *   2. 播放内核: 点击弹窗选择(系统内核 / 腾讯 X5), 重启应用后生效;
+ *      其下为无图模式开关(隐藏大图加速加载, 即时生效)
+ *   3. 应用自动更新: 开关(启动时自动检测新版本) + 手动"立即检查更新"
  *
  * 视觉与频道/清晰度面板完全一致: 影院深色面板 + 琥珀强调 + 焦点黄底黑字。
  * 手机触摸切换; 电视十字键导航 + OK 切换 + BACK 关闭。
@@ -49,6 +50,8 @@ class SettingsSheetView @JvmOverloads constructor(
         fun onInvertSwitchChanged(invert: Boolean)
         /** 自动更新开关变化 */
         fun onAutoUpdateChanged(enabled: Boolean)
+        /** 无图模式开关变化(隐藏大图保留图标) */
+        fun onNoImageChanged(enabled: Boolean)
         /** 点击"立即检查更新" */
         fun onCheckUpdateClick()
         /** 切换播放内核(true=X5, false=系统) */
@@ -62,6 +65,7 @@ class SettingsSheetView @JvmOverloads constructor(
 
     private val toggleInvert: ToggleView
     private val toggleAutoUpdate: ToggleView
+    private val toggleNoImage: ToggleView
     private val kernelValue: TextView
     private val kernelNote: TextView
     private val kernelOverlay: FrameLayout
@@ -147,7 +151,21 @@ class SettingsSheetView @JvmOverloads constructor(
         ).apply { bottomMargin = ui.dp(6f) })
         rowKernel.setOnClickListener { showKernelPicker() }
 
-        // ---- 项 3: 应用自动更新 ----
+        // ---- 项 3: 无图模式(隐藏大图加速加载, 即时生效) ----
+        val (rowNoImage, t3) = createToggleRow(
+            title = "无图模式",
+            note = "隐藏海报等大图以加快加载，小图标不受影响。默认关闭。"
+        )
+        toggleNoImage = t3
+        content.addView(rowNoImage, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = ui.dp(6f) })
+        rowNoImage.setOnClickListener {
+            toggleNoImage.checked = !toggleNoImage.checked
+            callback?.onNoImageChanged(toggleNoImage.checked)
+        }
+
+        // ---- 项 4: 应用自动更新 ----
         val (rowAuto, t2) = createToggleRow(
             title = "应用自动更新",
             note = "启动时自动检测新版本，发现后提示更新。"
@@ -182,7 +200,7 @@ class SettingsSheetView @JvmOverloads constructor(
 
         // ---- TBS 内核管理(仅选 X5 时显示; 安装/清除线上内核) ----
         val tbsRow = TextView(context).apply {
-            text = "X5 内核管理（安装线上内核）›"
+            text = "X5 内核管理（下载 / 安装内核）›"
             setTextColor(0xFF7A8496.toInt())
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ui.sp(11f))
             gravity = Gravity.CENTER
@@ -376,9 +394,16 @@ class SettingsSheetView @JvmOverloads constructor(
 
     // ---------------- 对外 API ----------------
 
-    fun open(invert: Boolean, autoUpdate: Boolean, kernel: Boolean = false, kernelNoteText: String? = null) {
+    fun open(
+        invert: Boolean,
+        autoUpdate: Boolean,
+        kernel: Boolean = false,
+        kernelNoteText: String? = null,
+        noImage: Boolean = false
+    ) {
         toggleInvert.checked = invert
         toggleAutoUpdate.checked = autoUpdate
+        toggleNoImage.checked = noImage
         kernelX5 = kernel
         updateKernelValue()
         if (!kernelNoteText.isNullOrBlank()) {

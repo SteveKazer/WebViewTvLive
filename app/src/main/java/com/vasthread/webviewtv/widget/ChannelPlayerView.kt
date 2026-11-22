@@ -51,6 +51,9 @@ class ChannelPlayerView @JvmOverloads constructor(
     private val switchCover: View
     private val hideSwitchCoverAction = Runnable { hideSwitchCover() }
 
+    /** 当前节目是否处于版权受限状态(JS 检测命中; 换台/重新恢复时重置) */
+    private var copyrightBlocked = false
+
     /** 单击左半边 -> 频道列表 */
     var leftTapCallback: (() -> Unit)? = null
 
@@ -172,7 +175,9 @@ class ChannelPlayerView @JvmOverloads constructor(
             }
             // 版权限制: 立即揭幕, 展示页面版权提示(direct show, 不等起播)
             // 同时解开启动遮罩并放行手势(否则被盖住/无法唤起换台面板)
+            // v2.4.6: 命中后保持版权态(页面保活层持续显示), 换台时重置
             onCopyrightBlocked = {
+                copyrightBlocked = true
                 mainHandler.removeCallbacks(hideSwitchCoverAction)
                 switchCover.animate().cancel()
                 switchCover.visibility = View.GONE
@@ -246,6 +251,7 @@ class ChannelPlayerView @JvmOverloads constructor(
 
     /** 换台: 全程黑幕; resumeQuality=换台后跟随恢复的清晰度(页面切台会重置回蓝光) */
     fun switchChannel(name: String, resumeQuality: String = "") {
+        copyrightBlocked = false
         showSwitchCover()
         webView.switchChannel(name, resumeQuality)
     }
@@ -256,7 +262,18 @@ class ChannelPlayerView @JvmOverloads constructor(
         webView.setQuality(qualityLabel)
     }
 
-    fun restore(channel: String, quality: String) = webView.restore(channel, quality)
+    fun restore(channel: String, quality: String) {
+        copyrightBlocked = false
+        webView.restore(channel, quality)
+    }
+
+    /** 版权受限态下清晰度切换被禁止(供上层拦截, 避免卡"正在切换中") */
+    fun isCopyrightBlocked(): Boolean = copyrightBlocked
+
+    /** 无图模式开关下发到注入脚本(隐藏大图保留图标, 立即生效) */
+    fun applyNoImage(enabled: Boolean) {
+        webView.evaluate("window.__WVT__ && __WVT__.setNoImage(${if (enabled) "true" else "false"})", null)
+    }
 
     fun pauseVideo() = webView.pauseVideo()
 
