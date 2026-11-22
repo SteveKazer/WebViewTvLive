@@ -16,7 +16,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import com.vasthread.webviewtv.activity.TbsDebugActivity
+import com.vasthread.webviewtv.activity.TbsManagerActivity
 import com.vasthread.webviewtv.misc.UiScale
 
 /**
@@ -180,15 +180,15 @@ class SettingsSheetView @JvmOverloads constructor(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = ui.dp(6f) })
 
-        // ---- TBS 内核管理(仅选 X5 时显示; 用腾讯官方调试页手动装内核) ----
+        // ---- TBS 内核管理(仅选 X5 时显示; 安装/清除线上内核) ----
         val tbsRow = TextView(context).apply {
-            text = "TBS 内核管理（腾讯官方页） ›"
+            text = "X5 内核管理（安装线上内核）›"
             setTextColor(0xFF7A8496.toInt())
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ui.sp(11f))
             gravity = Gravity.CENTER
             setPadding(0, ui.dp(9f), 0, 0)
             setOnClickListener {
-                context.startActivity(Intent(context, TbsDebugActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                context.startActivity(Intent(context, TbsManagerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
         }
         content.addView(tbsRow, LinearLayout.LayoutParams(

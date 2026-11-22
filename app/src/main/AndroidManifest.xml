@@ -31,9 +31,9 @@
 			</intent-filter>
 		</activity>
 
-		<!-- 腾讯 X5 内核调试/管理页(原仓库 3.0.1 同款) -->
+		<!-- 腾讯 X5 内核管理(自绘, 原仓库 3.0.1 TBS 调试页功能) -->
 		<activity
-			android:name=".activity.TbsDebugActivity"
+			android:name=".activity.TbsManagerActivity"
 			android:screenOrientation="sensorLandscape"
 			android:theme="@style/FullscreenTheme" />
 
