@@ -269,9 +269,9 @@ class WebpageAdapterWebView @JvmOverloads constructor(
         post { evaluateJavascript(js) { value -> callback?.onResult(value) } }
     }
 
-    /** 换台: 隐藏鼠标点击页面频道按钮 */
-    fun switchChannel(name: String) {
-        evaluate("window.__WVT__ && __WVT__.switchChannel('${name.escapeJs()}')")
+    /** 换台: 隐藏鼠标点击页面频道按钮; resumeQuality=换台后跟随恢复的清晰度(页面切台会重置回蓝光) */
+    fun switchChannel(name: String, resumeQuality: String = "") {
+        evaluate("window.__WVT__ && __WVT__.switchChannel('${name.escapeJs()}', '${resumeQuality.escapeJs()}')")
     }
 
     /** 设置清晰度: 点击页面隐藏的清晰度菜单项 */

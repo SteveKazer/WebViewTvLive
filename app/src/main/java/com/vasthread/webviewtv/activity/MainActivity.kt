@@ -324,7 +324,8 @@ class MainActivity : AppCompatActivity() {
 		}
 		lastChannel = name
 		saveState()
-		playerView.switchChannel(name)
+		// 换台时跟随当前清晰度(页面切台会重置回蓝光, 起播后自动切回)
+		playerView.switchChannel(name, qualityShort(lastQuality))
 		channelSheet.setCurrent(name)
 		toastChannel(name)
 	}

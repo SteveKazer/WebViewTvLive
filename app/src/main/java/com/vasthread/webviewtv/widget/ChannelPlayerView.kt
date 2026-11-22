@@ -208,13 +208,15 @@ class ChannelPlayerView @JvmOverloads constructor(
             .start()
     }
 
-    fun switchChannel(name: String) {
+    /** 换台: 全程黑幕; resumeQuality=换台后跟随恢复的清晰度(页面切台会重置回蓝光) */
+    fun switchChannel(name: String, resumeQuality: String = "") {
         showSwitchCover()
-        webView.switchChannel(name)
+        webView.switchChannel(name, resumeQuality)
     }
 
-    /** 切清晰度: 不主动盖黑幕(JS 保持旧画面, 慢网 2.5 秒未起播时由 JS 通知再盖) */
+    /** 切清晰度: 全程黑幕(v2.4.4, JS 侧 beginStreamSwitch 立即通知盖黑幕) */
     fun setQuality(qualityLabel: String) {
+        showSwitchCover()
         webView.setQuality(qualityLabel)
     }
 

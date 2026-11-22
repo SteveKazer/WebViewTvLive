@@ -1,7 +1,7 @@
 // =====================================================================
 // 央视频TV 注入脚本 (注入到 https://www.yangshipin.cn/tv/home)
 // ---------------------------------------------------------------------
-// 核心思想: 只打开一个标签页, 沉浸式播放。(v2.4.3 系统 WebView/Chromium 版)
+// 核心思想: 只打开一个标签页, 沉浸式播放。(v2.4.4 系统 WebView/Chromium 版)
 //
 // 沉浸式方案(已实测):
 //   页面自身的"全屏"按钮在部分设备上不可靠, 因此改为注入 CSS:
@@ -15,13 +15,19 @@
 //   当前频道:  .tvSelect
 //   清晰度:    .bei-list .item (蓝光/超清/高清, 隐藏态可直接点击)
 //
-// 切流黑幕策略(v2.4.3 起分场景):
-//   换台: 全程原生黑幕(内容全变, 黑幕自然且遮设备端占位图形)。
-//   切清晰度: 保持旧画面(实测 Chromium 换流期间 video 元素不替换、
-//     保留最后一帧, 快速切换全程无黑屏); 仅慢网 >2.5s 未起播才盖黑幕。
-//     新流起播后若位置回退(页面换流会从 ct=0 重播, 即“重复播放前面部分”)，
-//     自动 seek 回切换前位置(垫片短流/长回放流均适用)。
+// 切流黑幕策略(v2.4.4):
+//   换台/切清晰度统一全程原生黑幕(实测设备端 WebView 在视频表面
+//   未就绪时会立即渲染原生占位图形(黑色大三角), 不留任何空窗)。
 //   视频真正恢复播放(rs>=3 且未暂停)后 notifyPlaybackResumed() 揭幕。
+//   切清晰度黑幕期间 seek 回切换前位置(避免页面从 ct=0 重播已看内容)。
+//
+// 换台清晰度跟随(实测: 页面切台会重置回蓝光):
+//   720P/540P 用户切台时页面会先加载蓝光流(电视上慢且易死锁),
+//   故切台后新流起播时自动切回目标清晰度, 全程黑幕盖住中间过程。
+//
+// 切台自愈:
+//   切台后 12 秒仍无有效画面时自动重试点击频道
+//   (相当于"切其他台再切回来"), 最多两次; 重试时黑幕持续盖住。
 //
 // 视频隐藏器:
 //   视频 paused/无数据或换台/切清晰度瞬间(在动作第一行)直接把 video 元素
@@ -113,34 +119,14 @@
 		} catch (e) { /* ignore */ }
 	}
 
-	// 调用原生盖切流黑幕并隐藏视频表面(换台等彻底切换场景的统一入口)
+	// 调用原生盖切流黑幕并隐藏视频表面(切流动作统一入口)
 	function beginStreamSwitch(videoEl) {
 		setVideoSurface(videoEl || q('video'), true);
 		notifySwitchBegin();
 	}
 
-	// ---------------- 切清晰度专项: 保持画面 + 延迟遮罩 + 位置恢复 ----------------
-	var switchCoverTimer = 0;     // 慢网延迟遮罩定时器
+	// ---------------- 清晰度切换: 位置恢复 ----------------
 	var pendingSeek = 0;          // 切换前位置(0=无需恢复)
-	var qualitySwitchSince = 0;   // 本次切清晰度时间戳(保护窗口内的 rs<=1 不隐藏旧画面)
-
-	// 慢网才盖黑幕: 2.5s 后仍未起播, 此刻旧画面已无意义,
-	// 隐藏视频并通知原生盖黑幕(遮设备端占位图形)
-	function armSwitchCoverTimer() {
-		cancelSwitchCoverTimer();
-		switchCoverTimer = setTimeout(function() {
-			switchCoverTimer = 0;
-			var v = q('video');
-			if (v && (v.paused || v.readyState < 3)) {
-				setVideoSurface(v, true);
-				notifySwitchBegin();
-				log('quality switch slow: cover on');
-			}
-		}, 2500);
-	}
-	function cancelSwitchCoverTimer() {
-		if (switchCoverTimer) { clearTimeout(switchCoverTimer); switchCoverTimer = 0; }
-	}
 
 	// 新流起播后位置恢复: 页面换流会从 ct=0 重播, 若明显回退则 seek 回切换前位置
 	function finishPendingSeek(v) {
@@ -157,25 +143,31 @@
 
 	window.__WVT__ = {
 
-		// 换台: 映射点击页面频道按钮
-		switchChannel: function(name) {
+		// 换台: 映射点击页面频道按钮; resumeQuality=换台后跟随恢复的清晰度
+		switchChannel: function(name, resumeQuality) {
 			var pill = findPill(name);
 			if (!pill) { console.error('[WVT] channel not found: ' + name); return false; }
 			var cur = q('.tvSelect');
-			if (cur && norm(cur.textContent) === norm(name)) { return true; } // 已是该频道
-			pendingSeek = 0;            // 换台: 位置恢复无意义
-			cancelSwitchCoverTimer();   // 清掉切清晰度的延迟遮罩
-			qualitySwitchSince = 0;     // 清掉保护窗口
-			beginStreamSwitch();        // 动作瞬间: 隐藏视频 + 原生黑幕, 平滑过渡
+			if (cur && norm(cur.textContent) === norm(name)) {
+				// 已是该频道: 仅跟随清晰度(不重复点击)
+				if (resumeQuality) { pendingFollowQuality = norm(resumeQuality); }
+				return true;
+			}
+			pendingSeek = 0;             // 换台: 位置恢复无意义
+			pendingFollowQuality = resumeQuality ? norm(resumeQuality) : ''; // 页面切台会重置回蓝光
+			retryTarget = name;          // 自愈重试目标
+			retryAt = Date.now();
+			retryCount = 0;
+			beginStreamSwitch();          // 动作瞬间: 隐藏视频 + 原生黑幕, 平滑过渡
 			pill.click();
 			stallSince = Date.now(); // 换台后重置卡住计时
-			log('switchChannel -> ' + name);
+			log('switchChannel -> ' + name + (resumeQuality ? ' (follow ' + resumeQuality + ')' : ''));
 			return true;
 		},
 
 		// 设置清晰度: 隐藏态直接点击清晰度菜单项(已实测生效)
-		// 不盖黑幕: Chromium 换流保留旧画面, 快速切换全程无黑屏;
-		// 记录当前位置, 起播后 seek 回去避免从 ct=0 重播
+		// 全程黑幕(v2.4.4): 遮设备端占位图形; 记录当前位置,
+		// 起播后 seek 回去避免从 ct=0 重播
 		setQuality: function(label) {
 			var items = qa('.bei-list .item');
 			var target = norm(label);
@@ -184,8 +176,7 @@
 					if (!/active/.test(items[i].className)) {
 						var v = q('video');
 						pendingSeek = (v && isFinite(v.duration) && v.currentTime > 3) ? v.currentTime : 0;
-						qualitySwitchSince = Date.now();
-						armSwitchCoverTimer(); // 慢网 >2.5s 未起播才盖黑幕
+						beginStreamSwitch(); // 立即黑幕 + 隐藏视频
 						items[i].click();
 					}
 					log('setQuality -> ' + label);
@@ -215,18 +206,15 @@
 		},
 
 		// 启动恢复: 页面频道列表一旦就绪立即切换(不等默认频道起播,
-		// 省一次完整加载约 3~8 秒), 清晰度随后跟设
+		// 省一次完整加载约 3~8 秒); 清晰度经换台跟随机制自动恢复
 		restore: function(channel, quality) {
 			var tries = 0;
 			function tryRestore() {
 				var pill = channel ? findPill(channel) : null;
 				if (channel && pill) {
 					setTimeout(function() { // 等 Vue 事件绑定稳定
-						window.__WVT__.switchChannel(channel);
-						if (quality) {
-							setTimeout(function() { window.__WVT__.setQuality(quality); }, 1500);
-						}
-				}, 300);
+						window.__WVT__.switchChannel(channel, quality || '');
+					}, 300);
 					return;
 				}
 				if (++tries < 45) { setTimeout(tryRestore, 400); } // 最多等待 ~18 秒
@@ -283,17 +271,25 @@
 		if (v === boundVideo) { return; }
 		boundVideo = v;
 		try {
-			// 切清晰度保护窗口内(4s)不因瞬态事件隐藏 — 换流期间保留旧画面;
-			// 换台不受影响(qualitySwitchSince 已清零)
-			var inQualityGuard = function() { return Date.now() - qualitySwitchSince < 4000; };
-			v.addEventListener('pause', function() { if (!inQualityGuard()) { setVideoSurface(v, true); } });
-			v.addEventListener('emptied', function() { if (!inQualityGuard()) { setVideoSurface(v, true); } });
-			// 新流元数据就绪即恢复位置(早于首帧渲染, 避免“从 ct=0 闪播片刻再跳回”)
+			v.addEventListener('pause', function() { setVideoSurface(v, true); });
+			v.addEventListener('emptied', function() { setVideoSurface(v, true); });
+			// 新流元数据就绪即恢复位置(早于首帧渲染)
 			v.addEventListener('loadedmetadata', function() { if (pendingSeek > 0) { finishPendingSeek(v); } });
 			v.addEventListener('playing', function() {
 				setVideoSurface(v, false);
-				cancelSwitchCoverTimer();
-				finishPendingSeek(v); // 兑底: 恢复到切换前位置(避开页面从 ct=0 重播)
+				// 换台清晰度跟随: 页面切台会重置回蓝光,
+				// 起播后若与目标清晰度不符则立即切回(黑幕已盖, 不揭幕)
+				if (pendingFollowQuality) {
+					var bei = q('.bei span');
+					var curQ = bei ? norm(bei.textContent) : '';
+					if (curQ && curQ.indexOf(pendingFollowQuality) < 0) {
+						log('follow quality after switch -> ' + pendingFollowQuality);
+						window.__WVT__.setQuality(pendingFollowQuality);
+						return; // 等目标清晰度流起播后再揭幕
+					}
+					pendingFollowQuality = '';
+				}
+				finishPendingSeek(v); // 恢复到切换前位置(避开页面从 ct=0 重播)
 				// 视频真正起播且确有画面后再揭幕(延迟片刻核对, 防止 rs 不足的假起播)
 				setTimeout(function() {
 					if (!v.paused && v.readyState >= 3 && v.videoWidth > 0) {
@@ -311,11 +307,8 @@
 				bindVideoEvents(v);
 				var hide = v.paused && !v.ended;
 				if (!hide && v.readyState <= 1) {
-					// 切清晰度保护窗口内不隐藏: 换流期间保留旧画面(无黑屏);
-					// 其余场景(意外断流)持续无数据超 600ms 仍隐藏兑底
-					if (Date.now() - qualitySwitchSince < 4000) {
-						surfaceEmptySince = 0;
-					} else if (surfaceEmptySince === 0) { surfaceEmptySince = Date.now(); }
+					// 持续无数据(切流后)超过 600ms 也隐藏
+					if (surfaceEmptySince === 0) { surfaceEmptySince = Date.now(); }
 					else if (Date.now() - surfaceEmptySince > 600) { hide = true; }
 				} else { surfaceEmptySince = 0; }
 				setVideoSurface(v, hide);
@@ -327,6 +320,13 @@
 	// 2. 向原生上报播放状态; 首帧就绪后通知揭幕
 	var lastNotify = 0;
 	var firstFrameSent = false;
+	// 换台后需跟随恢复的清晰度(页面切台会重置回蓝光)
+	var pendingFollowQuality = '';
+	// 切台自愈: 无画面时自动重试点击频道
+	var retryTarget = '';
+	var retryAt = 0;
+	var retryCount = 0;
+
 	function watchVideo() {
 		try {
 			var v = q('video');
@@ -380,6 +380,25 @@
 				playingNotified = 0;
 			}
 
+			// 换台自愈: 切台后 12s 仍无有效画面(rs<3 或无视频宽)时
+			// 自动重试点击频道(相当于"切其他台再切回来"), 最多两次;
+			// 重试时重新盖黑幕(App 侧 15s 兑底揭幕计时同步重置)
+			if (retryTarget && Date.now() - retryAt > 12000 && retryCount < 2) {
+				if (!v || v.paused || v.readyState < 3 || v.videoWidth === 0) {
+					var pill = findPill(retryTarget);
+					if (pill) {
+						beginStreamSwitch(); // 黑幕继续盖住
+						pill.click();
+						retryAt = Date.now();
+						retryCount++;
+						stallSince = Date.now();
+						log('channel switch self-retry #' + retryCount + ' -> ' + retryTarget);
+					}
+				} else {
+					retryTarget = ''; // 画面有效, 自愈结束
+				}
+			}
+
 			// 视频真正恢复播放时重置卡住计时
 			if (v && !v.paused && Date.now() - stallSince > 2000) {
 				stallSince = Date.now();
@@ -411,7 +430,7 @@
 		setTimeout(watchDetect, 5000);
 	}
 
-	log('injected, yangshipin immersive edition v2.4.3 (chromium)');
+	log('injected, yangshipin immersive edition v2.4.4 (chromium)');
 	injectImmersiveCss();
 	watchImmersive();
 	watchVideo();
