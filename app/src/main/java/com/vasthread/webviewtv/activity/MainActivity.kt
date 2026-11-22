@@ -70,6 +70,8 @@ class MainActivity : AppCompatActivity() {
 	private var invertSwitch = false
 	private var autoUpdate = true
 	private var scriptToastShown = false
+	private var kernelToastShown = false
+	private var kernelToastAt = 0L
 	private var lastBackAt = 0L
 
 	private val digitBuffer = StringBuilder()
@@ -163,7 +165,9 @@ class MainActivity : AppCompatActivity() {
 		playerView.onScriptReady = {
 			if (!scriptToastShown) {
 				scriptToastShown = true
-				toast("已连接央视频")
+				// 确保启动内核提示先显示(间隔不足 1.5s 时延后"已连接央视频")
+				val wait = (kernelToastAt + 1500 - System.currentTimeMillis()).coerceAtLeast(0L)
+				mainLayout.postDelayed({ toast("已连接央视频") }, wait)
 			}
 		}
 		playerView.onChannelsDetected = { json ->
@@ -245,17 +249,40 @@ class MainActivity : AppCompatActivity() {
 		playerView.start()
 	}
 
-	/** 设置页"播放内核"行的状态说明(含 X5 内核下载进度) */
+	/** 设置页"播放内核"行的状态说明(含 X5 内核版本/下载进度) */
 	private fun kernelNoteText(): String {
 		if (!WebKernel.isX5(this)) {
 			return "默认系统内核；老设备(如 Android 6.0 老电视)可选腾讯 X5。切换后重启应用生效。"
 		}
+		val ver = x5VersionOrZero()
 		return when {
-			WebKernel.x5Ready -> "X5 内核已生效。若播放异常可在设置中切回系统内核。"
+			WebKernel.x5Ready -> "腾讯 X5 内核已生效${if (ver > 0) "（v$ver）" else ""}。若播放异常可在设置中切回系统内核。"
 			WebKernel.x5Progress in 0..99 ->
-				"X5 内核下载中 ${WebKernel.x5Progress}%（完成前自动使用系统内核，完成后重启应用生效）。"
-			else -> "X5 内核准备中：首次使用需联网下载（约 30~60MB），完成前自动使用系统内核，完成后重启应用生效。"
+				"腾讯 X5 内核下载中 ${WebKernel.x5Progress}%（完成前自动使用系统内核，完成后重启应用生效）。"
+			ver > 0 -> "腾讯 X5 内核已安装（v$ver），重启应用后生效。"
+			else -> "腾讯 X5 内核准备中：首次使用需联网下载（约 30~60MB），完成前自动使用系统内核，完成后重启应用生效。"
 		}
+	}
+
+	/** 当前启动真正使用的内核文案(启动提示用) */
+	private fun currentKernelText(): String {
+		if (!WebKernel.isX5(this)) {
+			return "当前使用：系统内核"
+		}
+		val ver = x5VersionOrZero()
+		val verText = if (ver > 0) "（v$ver）" else ""
+		return when {
+			WebKernel.x5Ready -> "当前使用：腾讯 X5 内核$verText"
+			ver > 0 -> "当前使用：系统内核（腾讯 X5$verText 准备中）"
+			else -> "当前使用：系统内核（腾讯 X5 内核下载中）"
+		}
+	}
+
+	/** 获取 X5 内核版本号(0=未安装/未知) */
+	private fun x5VersionOrZero(): Int = try {
+		com.tencent.smtt.sdk.QbSdk.getTbsVersion(this)
+	} catch (t: Throwable) {
+		0
 	}
 
 	/** 页面就绪后恢复上次频道/清晰度(由注入脚本等待视频起播后执行) */
@@ -400,6 +427,14 @@ class MainActivity : AppCompatActivity() {
 		startPlayerIfNeeded()
 		playerView.playVideo()
 		playerView.requestFocus()
+		// 启动时先告知当前使用的播放内核(在"已连接央视频"之前)
+		if (!kernelToastShown) {
+			kernelToastShown = true
+			mainLayout.postDelayed({
+				kernelToastAt = System.currentTimeMillis()
+				toast(currentKernelText())
+			}, 600)
+		}
 	}
 
 	override fun onPause() {
