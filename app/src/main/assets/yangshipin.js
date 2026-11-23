@@ -186,6 +186,7 @@
 		try {
 			if (v && !v.muted) { v.muted = true; switchMuted = true; }
 		} catch (e) { /* ignore */ }
+		switchStartedAt = Date.now(); // 切流进行中(与 switchMuted 解耦, 兕底轮询用)
 		muteAllMedia();
 		setVideoSurface(v, true);
 		notifySwitchBegin();
@@ -194,6 +195,7 @@
 	// ---------------- 清晰度切换: 位置恢复 ----------------
 	var pendingSeek = 0;          // 切换前位置(0=无需恢复)
 	var switchMuted = false;      // 切流期间主动静音(画面确认后解除)
+	var switchStartedAt = 0;      // 本次切流开始时间(0=非切流态, 兕底轮询用)
 
 	// 新流起播后位置恢复: 页面换流会从 ct=0 重播, 若明显回退则 seek 回切换前位置
 	function finishPendingSeek(v) {
@@ -387,6 +389,13 @@
 				if (!v.paused && !switchMuted && !pendingFollowQuality) { setVideoSurface(v, false); }
 			});
 		} catch (e) { /* ignore */ }
+		// 竞态修复(v2.4.9): 页面切流可能销毁旧 video 重建新元素, 并在 250ms
+		// 轮询绑定本函数之前快速起播 —— playing 事件被错过导致切流确认
+		// 永不执行(实测: 视频层永久隐藏, 原生 15s 兑底揭幕后仍全黑)。
+		// 绑定新元素时若已在有效播放态, 立即走首帧确认揭幕。
+		try {
+			if (!v.paused && v.readyState >= 3 && v.videoWidth !== 0) { confirmResume(v); }
+		} catch (e) { /* ignore */ }
 	}
 
 	// 首帧确认(v2.4.9): requestVideoFrameCallback 在真实帧呈现时回调,
@@ -418,6 +427,7 @@
 				if (!retried) { setTimeout(function() { finishResume(v, true); }, 500); }
 				return;
 			}
+			switchStartedAt = 0; // 切流结束
 			setVideoSurface(v, false);
 			if (v.muted && switchMuted) { v.muted = false; switchMuted = false; }
 			// 首帧确认后: 除主视频外的其他媒体元素保持静音
@@ -453,6 +463,43 @@
 			}
 		} catch (e) { /* ignore */ }
 		setTimeout(watchVideoSurface, 250);
+	}
+
+	// 切流确认兑底自救(v2.4.9): 不依赖 playing 事件。
+	// 页面切流可能销毁旧 video/重建新元素, 事件绑定与触发存在竞态;
+	// 每次轮询直接检查视频状态, 已在有效播放态即立即揭幕(走正常
+	// finishResume, 保留首帧确认+解静音); 超过 8 秒仍未恢复则强制
+	// 揭幕自救(此后页面 loading/起播由页面自身与看门狗接管),
+	// 避免视频层永久隐藏造成“切几个台后全黑、再切才恢复”。
+	function forceResume(v) {
+		try {
+			if (v) {
+				setVideoSurface(v, false);
+				if (switchMuted && v.muted) { v.muted = false; } // 只解我们主动静音的
+			}
+			switchMuted = false;
+			switchStartedAt = 0;
+			// retryTarget 保留: 12s 自愈重试继续工作(可救活页面假死),
+			// 本函数只负责"揭幕防全黑", 两者配合且自愈有 retryCount<2 上限
+			pendingFollowQuality = '';  // 放弃清晰度跟随
+			lastDriftFixAt = Date.now(); // 漂移检测冷却 15s(页面可能尚未稳定)
+			notifyPlaybackResumed();
+			log('playback resume forced (switch settle timeout)');
+		} catch (e) { /* ignore */ }
+	}
+	function watchSwitchSettle() {
+		try {
+			if (switchStartedAt > 0) {
+				var elapsed = Date.now() - switchStartedAt;
+				var v = q('video');
+				if (v && !v.paused && v.readyState >= 3 && v.videoWidth !== 0) {
+					finishResume(v, false); // 外层条件与 finishResume 一致, 不会走失败重试
+				} else if (elapsed > 8000) {
+					forceResume(v || null); // 页面重建空窗期 v 可能为 null
+				}
+			}
+		} catch (e) { /* ignore */ }
+		setTimeout(watchSwitchSettle, 400);
 	}
 
 	// 2. 向原生上报播放状态; 首帧就绪后通知揭幕
@@ -769,6 +816,7 @@
 	watchVideo();
 	watchStall();
 	watchVideoSurface();
+	watchSwitchSettle();
 	watchDetect();
 	watchCopyright();
 	watchNoImage();
