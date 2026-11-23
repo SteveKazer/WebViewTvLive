@@ -78,14 +78,21 @@ object TbsCoreInstaller {
         false
     }
 
-    /** 内核包里是否有指定位数的 native 库(位数防错装的关键校验) */
+    /** 内核包里是否有指定位数的 native 库(位数防错装的关键校验)。
+     *  实测 tbs 内核包(lib/armeabi/... 或 lib/arm64-v8a/...)只含 so 文件条目,
+     *  没有目录条目, 因此按前缀遍历匹配, 兼容有无目录条目两种打包方式 */
     fun apkSupportsDeviceAbi(file: File, bits64: Boolean): Boolean = try {
-        ZipFile(file).use { zip ->
-            if (bits64) {
-                zip.getEntry("lib/arm64-v8a/") != null
-            } else {
-                zip.getEntry("lib/armeabi-v7a/") != null || zip.getEntry("lib/armeabi/") != null
+        val zip = ZipFile(file)
+        try {
+            val wanted = if (bits64) "lib/arm64-v8a/" else "lib/armeabi"
+            val entries = zip.entries()
+            var found = false
+            while (!found && entries.hasMoreElements()) {
+                found = entries.nextElement().name.startsWith(wanted)
             }
+            found
+        } finally {
+            zip.close()
         }
     } catch (e: Exception) {
         false
