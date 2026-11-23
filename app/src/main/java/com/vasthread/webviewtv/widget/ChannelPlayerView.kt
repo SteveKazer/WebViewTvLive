@@ -3,6 +3,7 @@ package com.vasthread.webviewtv.widget
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
+import android.media.AudioManager
 import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
@@ -18,6 +19,7 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import com.vasthread.webviewtv.R
 import com.vasthread.webviewtv.misc.WebKernel
+import com.vasthread.webviewtv.misc.preference
 
 /**
  * 播放器视图: 启动遮罩 + 防误触遮罩 + 映射点击。
@@ -39,6 +41,53 @@ class ChannelPlayerView @JvmOverloads constructor(
         private const val SWIPE_DISTANCE_THRESHOLD = 60f
         private const val LOADING_SAFETY_TIMEOUT = 30000L
         private const val SWITCH_COVER_SAFETY_TIMEOUT = 15000L
+        /** 与 MainActivity.KEY_NO_IMAGE 同名(无图模式偏好, 内核创建时读取) */
+        private const val PREF_NO_IMAGE = "no_image"
+    }
+
+    // ---------------- 系统级切流静音锁(v2.4.9) ----------------
+    // 页面切流时旧流音频实例可能未销毁, 元素级 muted 压不住"残留声音"
+    // (实测小米 G27 Pro: 画面已是新台, 声音还是旧台)。切流开始直接静音
+    // 系统音乐流(AudioManager.STREAM_MUSIC), 首帧确认揭幕时恢复切流前
+    // 状态 —— 不管声音来自哪个元素/哪条流都彻底静音。
+    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private var sysMutedByUs = false
+    private var sysMutedBefore = false
+
+    private fun isSysStreamMuted(): Boolean =
+        if (Build.VERSION.SDK_INT >= 23) {
+            try { audioManager.isStreamMute(AudioManager.STREAM_MUSIC) } catch (t: Throwable) { false }
+        } else false
+
+    private fun setSysStreamMuted(mute: Boolean) {
+        try {
+            if (Build.VERSION.SDK_INT >= 23) {
+                audioManager.adjustStreamVolume(
+                    AudioManager.STREAM_MUSIC,
+                    if (mute) AudioManager.ADJUST_MUTE else AudioManager.ADJUST_UNMUTE,
+                    0
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.setStreamMute(AudioManager.STREAM_MUSIC, mute)
+            }
+        } catch (t: Throwable) { /* ignore */ }
+    }
+
+    /** 切流开始: 静音系统音乐流(记录切流前的用户静音状态, 不覆盖) */
+    private fun lockSystemAudio() {
+        if (!sysMutedByUs) {
+            sysMutedBefore = isSysStreamMuted()
+            sysMutedByUs = true
+        }
+        if (!isSysStreamMuted()) { setSysStreamMuted(true) }
+    }
+
+    /** 切流结束(揭幕): 恢复切流前的静音状态 */
+    private fun unlockSystemAudio() {
+        if (!sysMutedByUs) { return }
+        sysMutedByUs = false
+        if (isSysStreamMuted() && !sysMutedBefore) { setSysStreamMuted(false) }
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -153,6 +202,8 @@ class ChannelPlayerView @JvmOverloads constructor(
         host.addView(webViewImpl, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
         ))
+        // 无图模式: 内核创建时即应用偏好(禁图在页面加载前生效才有意义)
+        wv.setImagesEnabled(!preference.getBoolean(PREF_NO_IMAGE, false))
         fullscreenContainer = findViewById(R.id.fullscreenContainer)
         loadingOverlay = findViewById(R.id.loadingOverlay)
         switchCover = findViewById(R.id.switchCover)
@@ -175,7 +226,7 @@ class ChannelPlayerView @JvmOverloads constructor(
             }
             // 版权限制: 立即揭幕, 展示页面版权提示(direct show, 不等起播)
             // 同时解开启动遮罩并放行手势(否则被盖住/无法唤起换台面板)
-            // v2.4.6: 命中后保持版权态(页面保活层持续显示), 换台时重置
+            // v2.4.9: 版权节目无音源, 系统静音锁在此恢复(避免残留)
             onCopyrightBlocked = {
                 copyrightBlocked = true
                 mainHandler.removeCallbacks(hideSwitchCoverAction)
@@ -184,6 +235,7 @@ class ChannelPlayerView @JvmOverloads constructor(
                 switchCover.alpha = 1f
                 this@ChannelPlayerView.firstFrame = true
                 this@ChannelPlayerView.hideLoading()
+                this@ChannelPlayerView.unlockSystemAudio()
                 this@ChannelPlayerView.onCopyrightBlocked?.invoke()
             }
             onPlaybackStutter = { this@ChannelPlayerView.onPlaybackStutter?.invoke() }
@@ -226,8 +278,10 @@ class ChannelPlayerView @JvmOverloads constructor(
      * 显示切流遮罩: 换台/切清晰度全程纯黑盖住 WebView,
      * 防止设备端 WebView 在视频表面渲染原生占位图形(黑色大三角)。
      * 若播放恢复通知丢失, 15 秒后自动揭幕兑底。
+     * v2.4.9: 同时静音系统音乐流(声音残留兑底)
      */
     fun showSwitchCover() {
+        lockSystemAudio()
         mainHandler.removeCallbacks(hideSwitchCoverAction)
         switchCover.animate().cancel()
         switchCover.alpha = 1f
@@ -235,8 +289,9 @@ class ChannelPlayerView @JvmOverloads constructor(
         mainHandler.postDelayed(hideSwitchCoverAction, SWITCH_COVER_SAFETY_TIMEOUT)
     }
 
-    /** 收到"视频真正起播"后揭幕(快速淡出) */
+    /** 收到"视频真正起播"后揭幕(快速淡出), 并恢复切流前音频状态 */
     fun hideSwitchCover() {
+        unlockSystemAudio()
         mainHandler.removeCallbacks(hideSwitchCoverAction)
         if (switchCover.visibility != View.VISIBLE) return
         switchCover.animate()
@@ -270,9 +325,19 @@ class ChannelPlayerView @JvmOverloads constructor(
     /** 版权受限态下清晰度切换被禁止(供上层拦截, 避免卡"正在切换中") */
     fun isCopyrightBlocked(): Boolean = copyrightBlocked
 
-    /** 无图模式开关下发到注入脚本(隐藏大图保留图标, 立即生效) */
+    /**
+     * 无图模式(v2.4.9 升级): 内核层禁图(请求不发出, 参照 CCTV_Viewer)
+     * + JS 隐藏大图双管齐下; 即时生效。
+     */
     fun applyNoImage(enabled: Boolean) {
+        webView.setImagesEnabled(!enabled)
         webView.evaluate("window.__WVT__ && __WVT__.setNoImage(${if (enabled) "true" else "false"})", null)
+    }
+
+    override fun onDetachedFromWindow() {
+        // 防残留: 视图销毁时若系统静音仍由我们持有, 恢复切流前状态
+        unlockSystemAudio()
+        super.onDetachedFromWindow()
     }
 
     fun pauseVideo() = webView.pauseVideo()

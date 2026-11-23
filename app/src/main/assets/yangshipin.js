@@ -171,12 +171,22 @@
 	}
 
 	// 调用原生盖切流黑幕并隐藏/静音视频表面(切流动作统一入口)
-	// 静音: 旧台声音立即消失; 揭幕(画面确认)时才解除 —— 声画同步
+	// 静音(v2.4.9 强化): 页面切流时旧流音频实例可能未销毁(实测新设备上
+	// "画面已是新台, 声音还是旧台"), 遍历所有 video/audio 元素强制静音;
+	// 原生侧另有系统级静音锁兑底(不管声音来自哪个元素都压住)
+	function muteAllMedia() {
+		try {
+			qa('video, audio').forEach(function(m) {
+				try { if (!m.muted) { m.muted = true; } } catch (e) { /* ignore */ }
+			});
+		} catch (e) { /* ignore */ }
+	}
 	function beginStreamSwitch(videoEl) {
 		var v = videoEl || q('video');
 		try {
 			if (v && !v.muted) { v.muted = true; switchMuted = true; }
 		} catch (e) { /* ignore */ }
+		muteAllMedia();
 		setVideoSurface(v, true);
 		notifySwitchBegin();
 	}
@@ -410,6 +420,13 @@
 			}
 			setVideoSurface(v, false);
 			if (v.muted && switchMuted) { v.muted = false; switchMuted = false; }
+			// 首帧确认后: 除主视频外的其他媒体元素保持静音
+			// (页面切流时旧流音频实例可能还活着, 防止残留声音)
+			try {
+				qa('video, audio').forEach(function(m) {
+					if (m !== v) { try { m.muted = true; } catch (e) { /* ignore */ } }
+				});
+			} catch (e) { /* ignore */ }
 			notifyPlaybackResumed();
 			log('playback resume confirmed (first frame)');
 		} catch (e) { /* ignore */ }
@@ -419,9 +436,9 @@
 			var v = q('video');
 			if (v) {
 				bindVideoEvents(v);
-				// 静音锁(v2.4.9): 页面自动播放逻辑可能自行解除静音,
-				// 每 250ms 强制压回, 直到首帧确认(finishResume)才放行
-				if (switchMuted && !v.muted) { try { v.muted = true; } catch (e) { /* ignore */ } }
+				// 静音锁(v2.4.9): 页面自动播放逻辑可能自行解除静音, 新建音频
+				// 实例可能发声 —— 每 250ms 对所有媒体元素强制压回
+				if (switchMuted) { muteAllMedia(); }
 				var hide = v.paused && !v.ended;
 				if (switchMuted || pendingFollowQuality) {
 					// 切流全程保持视频层隐藏(由 finishResume 统一揭幕),

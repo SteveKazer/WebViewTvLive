@@ -25,7 +25,7 @@ import com.vasthread.webviewtv.misc.UiScale
  * 目前三部分设置:
  *   1. 上下按键切换: 开关。开启=反转(手机上滑/电视按下键 改为切上一个台)
  *   2. 播放内核: 点击弹窗选择(系统内核 / 腾讯 X5), 重启应用后生效;
- *      其下为无图模式开关(隐藏大图加速加载, 即时生效)
+ *      其下为无图模式开关(内核层禁图, 加载提速最大)
  *   3. 应用自动更新: 开关(启动时自动检测新版本) + 手动"立即检查更新"
  *
  * 视觉与频道/清晰度面板完全一致: 影院深色面板 + 琥珀强调 + 焦点黄底黑字。
@@ -50,7 +50,7 @@ class SettingsSheetView @JvmOverloads constructor(
         fun onInvertSwitchChanged(invert: Boolean)
         /** 自动更新开关变化 */
         fun onAutoUpdateChanged(enabled: Boolean)
-        /** 无图模式开关变化(隐藏大图保留图标) */
+        /** 无图模式开关变化(内核层禁图, 参照 CCTV_Viewer) */
         fun onNoImageChanged(enabled: Boolean)
         /** 点击"立即检查更新" */
         fun onCheckUpdateClick()
@@ -165,10 +165,10 @@ class SettingsSheetView @JvmOverloads constructor(
         tvRows.add(rowKernel)
         rowKernel.setOnClickListener { showKernelPicker() }
 
-        // ---- 项 3: 无图模式(隐藏大图加速加载, 即时生效) ----
+        // ---- 项 3: 无图模式(内核层禁图, 加载提速最大) ----
         val (rowNoImage, t3) = createToggleRow(
             title = "无图模式",
-            note = "隐藏海报等大图以加快加载，小图标不受影响。默认关闭。"
+            note = "开启后不加载任何图片（海报/封面/台标），加载最快；默认关闭。"
         )
         toggleNoImage = t3
         content.addView(rowNoImage, LinearLayout.LayoutParams(

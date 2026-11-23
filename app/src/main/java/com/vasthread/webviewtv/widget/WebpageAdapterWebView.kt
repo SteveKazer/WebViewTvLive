@@ -292,6 +292,13 @@ class WebpageAdapterWebView @JvmOverloads constructor(
 
     override fun playVideo() = evaluate("window.__WVT__ && __WVT__.play()", null)
 
+    /** 无图模式: 内核层禁用图片加载(请求不发出), 参照 CCTV_Viewer 实测做法 */
+    override fun setImagesEnabled(enabled: Boolean) {
+        settings.loadsImagesAutomatically = enabled
+        settings.blockNetworkImage = !enabled
+        Log.i(TAG, "images enabled=$enabled")
+    }
+
     // ---------------- JS -> 原生 ----------------
 
     /** 注入脚本就绪 */

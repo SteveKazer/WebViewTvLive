@@ -241,7 +241,7 @@ class MainActivity : AppCompatActivity() {
 				noImage = enabled
 				preference.edit().putBoolean(KEY_NO_IMAGE, enabled).apply()
 				playerView.applyNoImage(enabled)
-				toast(if (enabled) "已开启无图模式（大图隐藏，加载更快）" else "已关闭无图模式")
+				toast(if (enabled) "已开启无图模式（不加载图片，加载最快）" else "已关闭无图模式")
 			}
 
 				override fun onCheckUpdateClick() {

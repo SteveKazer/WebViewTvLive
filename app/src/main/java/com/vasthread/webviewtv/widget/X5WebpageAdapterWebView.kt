@@ -277,6 +277,17 @@ class X5WebpageAdapterWebView @JvmOverloads constructor(
 
     override fun playVideo() = evaluate("window.__WVT__ && __WVT__.play()", null)
 
+    /** 无图模式: 内核层禁用图片加载(请求不发出), 参照 CCTV_Viewer 实测做法 */
+    override fun setImagesEnabled(enabled: Boolean) {
+        try {
+            settings.loadsImagesAutomatically = enabled
+            settings.blockNetworkImage = !enabled
+            android.util.Log.i(TAG, "images enabled=$enabled")
+        } catch (t: Throwable) {
+            android.util.Log.w(TAG, "setImagesEnabled failed", t)
+        }
+    }
+
     // ---------------- JS -> 原生 ----------------
 
     @JavascriptInterface
