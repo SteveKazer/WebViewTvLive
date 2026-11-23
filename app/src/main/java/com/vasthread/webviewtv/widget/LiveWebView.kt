@@ -58,12 +58,4 @@ interface LiveWebView {
     fun playVideo()
 
     fun evaluate(js: String, callback: ((String) -> Unit)? = null)
-
-    /**
-     * 无图模式(v2.4.9): enabled=false 时在内核层禁用图片加载
-     * (loadsImagesAutomatically=false + blockNetworkImage=true),
-     * 图片请求完全不发出, 加载提速远大于 JS 隐藏;
-     * 参照 CCTV_Viewer 的实测做法。
-     */
-    fun setImagesEnabled(enabled: Boolean)
 }

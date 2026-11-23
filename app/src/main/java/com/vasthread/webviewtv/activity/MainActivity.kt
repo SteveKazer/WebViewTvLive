@@ -36,7 +36,7 @@ class MainActivity : AppCompatActivity() {
 		private const val KEY_PROVINCE = "province"
 		private const val KEY_INVERT_SWITCH = "invert_switch"
 		private const val KEY_AUTO_UPDATE = "auto_update"
-		private const val KEY_NO_IMAGE = "no_image"
+		private const val KEY_HW_RENDER = "hw_render"
 		private const val SHEET_TIMEOUT = 8000L
 		private const val EXIT_CONFIRM_WINDOW = 2000L
 		private const val DIGIT_INPUT_TIMEOUT = 1200L
@@ -70,7 +70,7 @@ class MainActivity : AppCompatActivity() {
 	private var province: String? = null
 	private var invertSwitch = false
 	private var autoUpdate = true
-	private var noImage = false
+	private var hwRender = true
 	private var scriptToastShown = false
 	private var lastBackAt = 0L
 
@@ -103,7 +103,7 @@ class MainActivity : AppCompatActivity() {
 				UiMode.SETTINGS -> {
 					channelSheet.visibility = View.GONE
 					qualitySheet.visibility = View.GONE
-					settingsSheet.open(invertSwitch, autoUpdate, WebKernel.isX5(this), kernelNoteText(), noImage)
+					settingsSheet.open(invertSwitch, autoUpdate, WebKernel.isX5(this), kernelNoteText(), hwRender)
 					repostCloseAction()
 				}
 				UiMode.STANDARD -> {
@@ -168,8 +168,6 @@ class MainActivity : AppCompatActivity() {
 				// 内核信息合并在这里一次性告知(不在启动黑屏期单独弹 toast)
 				toast("已连接央视频 · ${kernelShortText()}")
 			}
-			// 无图模式偏好下发到注入脚本(页面脚本就绪后立即生效)
-			playerView.applyNoImage(noImage)
 		}
 		playerView.onChannelsDetected = { json ->
 			// 页面频道检测: 更新库中频道可见性(备用卫视检测到即显示)
@@ -237,12 +235,12 @@ class MainActivity : AppCompatActivity() {
 				toast(if (enabled) "已开启自动更新" else "已关闭自动更新")
 			}
 
-				override fun onNoImageChanged(enabled: Boolean) {
-				noImage = enabled
-				preference.edit().putBoolean(KEY_NO_IMAGE, enabled).apply()
-				playerView.applyNoImage(enabled)
-				toast(if (enabled) "已开启无图模式（不加载图片，加载最快）" else "已关闭无图模式")
-			}
+			override fun onHwRenderChanged(enabled: Boolean) {
+			hwRender = enabled
+			preference.edit().putBoolean(KEY_HW_RENDER, enabled).apply()
+			playerView.applyHwRender(enabled)
+			toast(if (enabled) "已开启硬件加速渲染（GPU）" else "已切换软件渲染（CPU 渲染兑底，画面改动后立即生效）")
+		}
 
 				override fun onCheckUpdateClick() {
 				updateManager.checkManual()
@@ -327,7 +325,7 @@ class MainActivity : AppCompatActivity() {
 			province = preference.getString(KEY_PROVINCE, null)
 			invertSwitch = preference.getBoolean(KEY_INVERT_SWITCH, false)
 			autoUpdate = preference.getBoolean(KEY_AUTO_UPDATE, true)
-			noImage = preference.getBoolean(KEY_NO_IMAGE, false)
+			hwRender = preference.getBoolean(KEY_HW_RENDER, true)
 		}
 	}
 

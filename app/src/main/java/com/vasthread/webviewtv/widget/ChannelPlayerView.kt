@@ -41,8 +41,8 @@ class ChannelPlayerView @JvmOverloads constructor(
         private const val SWIPE_DISTANCE_THRESHOLD = 60f
         private const val LOADING_SAFETY_TIMEOUT = 30000L
         private const val SWITCH_COVER_SAFETY_TIMEOUT = 15000L
-        /** 与 MainActivity.KEY_NO_IMAGE 同名(无图模式偏好, 内核创建时读取) */
-        private const val PREF_NO_IMAGE = "no_image"
+        /** 与 MainActivity.KEY_HW_RENDER 同名(硬件加速渲染偏好, WebView 创建时读取) */
+        private const val PREF_HW_RENDER = "hw_render"
     }
 
     // ---------------- 系统级切流静音锁(v2.4.9) ----------------
@@ -202,8 +202,8 @@ class ChannelPlayerView @JvmOverloads constructor(
         host.addView(webViewImpl, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
         ))
-        // 无图模式: 内核创建时即应用偏好(禁图在页面加载前生效才有意义)
-        wv.setImagesEnabled(!preference.getBoolean(PREF_NO_IMAGE, false))
+        // 硬件加速渲染: 跟随偏好应用(LAYER_TYPE_NONE=GPU 渲染 / SOFTWARE=软渲染兑底)
+        if (!preference.getBoolean(PREF_HW_RENDER, true)) { applyHwRender(false) }
         fullscreenContainer = findViewById(R.id.fullscreenContainer)
         loadingOverlay = findViewById(R.id.loadingOverlay)
         switchCover = findViewById(R.id.switchCover)
@@ -326,12 +326,16 @@ class ChannelPlayerView @JvmOverloads constructor(
     fun isCopyrightBlocked(): Boolean = copyrightBlocked
 
     /**
-     * 无图模式(v2.4.9 升级): 内核层禁图(请求不发出, 参照 CCTV_Viewer)
-     * + JS 隐藏大图双管齐下; 即时生效。
+     * 硬件加速渲染(v2.4.9): enabled=true 清除图层覆盖(跟随窗口默认 GPU 渲染);
+     * enabled=false 切软件渲染(CPU, 部分异常设备的兼容兑底, 流畅度会下降)。
+     * 视频解码本身由内核自动选硬解(MediaCodec/GPU), 需 GPU 渲染管线配合输出,
+     * 关闭后画面输出改走 CPU, 个别设备可解决花屏/黑纹等问题。即时生效。
      */
-    fun applyNoImage(enabled: Boolean) {
-        webView.setImagesEnabled(!enabled)
-        webView.evaluate("window.__WVT__ && __WVT__.setNoImage(${if (enabled) "true" else "false"})", null)
+    fun applyHwRender(enabled: Boolean) {
+        webViewImpl.setLayerType(
+            if (enabled) View.LAYER_TYPE_NONE else View.LAYER_TYPE_SOFTWARE,
+            null
+        )
     }
 
     override fun onDetachedFromWindow() {

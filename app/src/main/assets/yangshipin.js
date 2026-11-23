@@ -62,10 +62,9 @@
 //   版权态下清晰度操作被忽略(页面不会响应, 避免卡"正在切换中"),
 //   也不再弹原生底部文字提示。
 //
-// 无图模式(v2.4.6):
-//   setNoImage(true): 隐藏海报/封面等大图并给图片加 lazy 加载,
-//   减少解码渲染与首屏流量; 小图标与页面自身加载动画不受影响。
-//   默认关闭, 由原生在脚本就绪/设置开关变化时下发。
+// 无图模式(v2.4.6, v2.4.9 已移除):
+//   setNoImage 开关与实现已整体移除 —— 实测部分设备上内核层禁图
+//   (blockNetworkImage) 会干扰视频加载, 稳定性优先, 不再提供。
 //
 // 卡顿提示(v2.4.6):
 //   播放中持续缓冲(readyState<3)超过 4 秒且距上次提示 >60 秒时,
@@ -74,7 +73,13 @@
 // 视频隐藏器:
 //   视频 paused/无数据或换台/切清晰度瞬间(在动作第一行)直接把 video 元素
 //   visibility:hidden —— 切换过程黑幕平滑过渡、不露旧画面/控制条,
-//   恢复播放(playing/canplay)立即恢复显示; 事件驱动 + 200ms 轮询兑底。
+//   恢复播放(playing/canplay)立即恢复显示; 事件驱动 + 250ms 轮询兑底;
+//   页面重建新 video 时由 MutationObserver 同帧立即隐藏(v2.4.9,
+//   根治内核原生大播放按钮在轮询窗口内闪现/滞留)。
+//
+// 加载动画隐藏(v2.4.9):
+//   央视频页面自带的加载动画(.loading1 转圈 + .loading 黑底加载层)
+//   由沉浸式 CSS 全部隐藏; 版权提示保活层克隆的 .loading1 特例恢复。
 //
 // 频道检测:
 //   每帧扫描页面频道 pill, 集合变化时上报原生 notifyChannels(json),
@@ -135,8 +140,13 @@
 		'[class^="winG-mask"], [class^="winY-"], [class^="winA-mask"] { display:none !important; }',
 		// video.js 大播放按钮: X5 下换清晰度/换台瞬间视频进入 paused 态会渲染巨大播放图标, 隐藏之
 		'.vjs-big-play-button { display:none !important; }',
-		// 无图模式: 被标记的大图隐藏(见 applyNoImage), 小图标不受影响
-		'.wvt-noimg { display:none !important; }'
+		// 加载动画隐藏(v2.4.9): 央视频页面自带的加载动画(.loading1 转圈 + 文字,
+		// .loading.black-bg 黑底加载层)全部隐藏 —— 切换过程只保留原生"正在切换"
+		// 黑幕动画, 到有画面有声音即揭幕, 页面动画与黑幕叠加的杂乱感消失。
+		// 版权提示保活层(#wvt-copyright-keeper)克隆自 .loading1 结构, 特例恢复显示。
+		'.loading1 { display:none !important; }',
+		'#wvt-copyright-keeper .loading1, #wvt-copyright-keeper .loading { display:block !important; }',
+		'body > .loading, div.loading.black-bg { display:none !important; }'
 	].join('\n');
 
 	function injectImmersiveCss() {
@@ -304,13 +314,6 @@
 				else { log('restore timeout, keep default channel'); }
 			}
 			tryRestore();
-		},
-
-		// 无图模式开关(原生在脚本就绪与设置变化时调用): 隐藏大图保留小图标
-		setNoImage: function(on) {
-			noImageMode = !!on;
-			applyNoImage();
-			log('no-image mode: ' + noImageMode);
 		},
 
 		// JS 控制播放/暂停(供 App 生命周期使用)
@@ -579,45 +582,53 @@
 		setTimeout(watchCopyright, 1000);
 	}
 
-	// ---------------- 无图模式(v2.4.6): 隐藏大图加速渲染, 保留小图标 ----------------
-	// 页面自身的加载动画(.loading1/.loading)、清晰度菜单与控制条里的
-	// 图片属于功能元素, 一律不动(否则丢失加载反馈与交互图标);
-	// 其余图片按尺寸判定: 自然尺寸任一边 >=300px 或渲染区 >=200x150
-	// 即视为大图(海报/封面/横幅), 加 wvt-noimg 类隐藏; 小图标不受影响。
-	// 同时给图片设置 loading=lazy, 未进入视口的大图不再请求流量。
-	var noImageMode = false;
-	function isProtectedImage(img) {
+	// ------------- 新 video 元素即时隐藏(v2.4.9): 根治内核大播放按钮 -------------
+	// 页面切台/切清晰度会销毁旧 video 并重建新元素。新元素插入 DOM 的瞬间
+	// 处于 paused 态, 内核(系统 WebView/X5)会在视频表面渲染原生大播放按钮;
+	// 此前靠 250ms 轮询隐藏, 窗口期内按钮可见(实测切换分辨率时高频复现)。
+	// MutationObserver 在元素插入的同一帧直接隐藏, 消灭竞态窗口:
+	//   - 切流中(静音锁/清晰度跟随/切流计时任一有效): 一律先隐藏,
+	//     由首帧确认(finishResume)统一恢复可见
+	//   - 非切流态: paused/无数据的新元素也隐藏(会画大按钮), 已在有效
+	//     播放态的元素不动(避免误伤正常画面)
+	var newVideoObserver = null;
+	function observeNewVideos() {
 		try {
-			if (img.closest && img.closest('.loading1, .loading, .bei, .bei-list, .vjs-control-bar')) { return true; }
+			if (typeof MutationObserver !== 'function') { return; }
+			newVideoObserver = new MutationObserver(function(muts) {
+				try {
+					for (var i = 0; i < muts.length; i++) {
+						var added = muts[i].addedNodes;
+						for (var j = 0; j < added.length; j++) {
+							var n = added[j];
+							if (!n || n.nodeType !== 1) { continue; }
+							if (n.tagName !== 'VIDEO' && n.getElementsByTagName) {
+								// 容器节点: 只查一层子 video(重建的播放器 DOM 不深)
+								var inner = n.getElementsByTagName('video');
+								for (var k = 0; k < inner.length; k++) { hideNewVideoIfNeeds(inner[k]); }
+								continue;
+							}
+							if (n.tagName === 'VIDEO') { hideNewVideoIfNeeds(n); }
+						}
+					}
+				} catch (e) { /* ignore */ }
+			});
+			newVideoObserver.observe(document.body || document.documentElement, {
+				childList: true, subtree: true
+			});
+			log('new-video observer installed');
 		} catch (e) { /* ignore */ }
-		return false;
 	}
-	function applyNoImage() {
+	function hideNewVideoIfNeeds(v) {
 		try {
-			var imgs = document.images || [];
-			for (var i = 0; i < imgs.length; i++) {
-				var img = imgs[i];
-				if (isProtectedImage(img)) {
-					img.classList.remove('wvt-noimg');
-					continue;
-				}
-				var w = img.naturalWidth || 0, h = img.naturalHeight || 0;
-				var r = img.getBoundingClientRect();
-				var rw = r ? r.width : 0, rh = r ? r.height : 0;
-				var big = w >= 300 || h >= 300 || (rw >= 200 && rh >= 150);
-				if (noImageMode) {
-					try { img.loading = 'lazy'; } catch (e) { /* ignore */ }
-					if (big) { img.classList.add('wvt-noimg'); }
-					else { img.classList.remove('wvt-noimg'); }
-				} else if (img.classList.contains('wvt-noimg')) {
-					img.classList.remove('wvt-noimg');
-				}
+			if (switchMuted || pendingFollowQuality || switchStartedAt > 0) {
+				if (v.style.visibility !== 'hidden') { v.style.visibility = 'hidden'; }
+				return;
+			}
+			if (v.paused && !v.ended) {
+				if (v.style.visibility !== 'hidden') { v.style.visibility = 'hidden'; }
 			}
 		} catch (e) { /* ignore */ }
-	}
-	function watchNoImage() {
-		if (noImageMode) { applyNoImage(); } // 周期扫新出现的大图(页面动态渲染)
-		setTimeout(watchNoImage, 2000);
 	}
 
 	// 清晰度跟随提前点击: 页面切台会重置回蓝光; 等新台真正生效
@@ -810,7 +821,7 @@
 		setTimeout(watchDetect, 5000);
 	}
 
-	log('injected, yangshipin immersive edition v2.4.9 (dual-kernel + no-image)');
+	log('injected, yangshipin immersive edition v2.4.9 (dual-kernel + hw-tuned)');
 	injectImmersiveCss();
 	watchImmersive();
 	watchVideo();
@@ -819,6 +830,6 @@
 	watchSwitchSettle();
 	watchDetect();
 	watchCopyright();
-	watchNoImage();
+	observeNewVideos();
 	callNative('notifyScriptReady');
 })();

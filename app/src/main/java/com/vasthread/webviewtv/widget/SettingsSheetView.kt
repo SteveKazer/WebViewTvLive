@@ -25,7 +25,7 @@ import com.vasthread.webviewtv.misc.UiScale
  * 目前三部分设置:
  *   1. 上下按键切换: 开关。开启=反转(手机上滑/电视按下键 改为切上一个台)
  *   2. 播放内核: 点击弹窗选择(系统内核 / 腾讯 X5), 重启应用后生效;
- *      其下为无图模式开关(内核层禁图, 加载提速最大)
+ *      其下为硬件加速渲染开关(默认开; 关闭后走软件渲染, 异常设备兼容兑底)
  *   3. 应用自动更新: 开关(启动时自动检测新版本) + 手动"立即检查更新"
  *
  * 视觉与频道/清晰度面板完全一致: 影院深色面板 + 琥珀强调 + 焦点黄底黑字。
@@ -50,8 +50,8 @@ class SettingsSheetView @JvmOverloads constructor(
         fun onInvertSwitchChanged(invert: Boolean)
         /** 自动更新开关变化 */
         fun onAutoUpdateChanged(enabled: Boolean)
-        /** 无图模式开关变化(内核层禁图, 参照 CCTV_Viewer) */
-        fun onNoImageChanged(enabled: Boolean)
+        /** 硬件加速渲染开关变化(GPU 渲染管线, 视频解码输出走 GPU) */
+        fun onHwRenderChanged(enabled: Boolean)
         /** 点击"立即检查更新" */
         fun onCheckUpdateClick()
         /** 切换播放内核(true=X5, false=系统) */
@@ -65,7 +65,7 @@ class SettingsSheetView @JvmOverloads constructor(
 
     private val toggleInvert: ToggleView
     private val toggleAutoUpdate: ToggleView
-    private val toggleNoImage: ToggleView
+    private val toggleHwRender: ToggleView
     private val kernelValue: TextView
     private val kernelNote: TextView
     private val kernelOverlay: FrameLayout
@@ -165,19 +165,19 @@ class SettingsSheetView @JvmOverloads constructor(
         tvRows.add(rowKernel)
         rowKernel.setOnClickListener { showKernelPicker() }
 
-        // ---- 项 3: 无图模式(内核层禁图, 加载提速最大) ----
-        val (rowNoImage, t3) = createToggleRow(
-            title = "无图模式",
-            note = "开启后不加载任何图片（海报/封面/台标），加载最快；默认关闭。"
+        // ---- 项 3: 硬件加速渲染(默认开; GPU 渲染管线) ----
+        val (rowHwRender, t3) = createToggleRow(
+            title = "硬件加速渲染",
+            note = "默认开启。视频解码输出走 GPU 硬件管线，流畅不发热；个别设备画面异常时再关闭改用软件渲染（CPU，较卡）。"
         )
-        toggleNoImage = t3
-        content.addView(rowNoImage, LinearLayout.LayoutParams(
+        toggleHwRender = t3
+        content.addView(rowHwRender, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { bottomMargin = ui.dp(6f) })
-        tvRows.add(rowNoImage)
-        rowNoImage.setOnClickListener {
-            toggleNoImage.checked = !toggleNoImage.checked
-            callback?.onNoImageChanged(toggleNoImage.checked)
+        tvRows.add(rowHwRender)
+        rowHwRender.setOnClickListener {
+            toggleHwRender.checked = !toggleHwRender.checked
+            callback?.onHwRenderChanged(toggleHwRender.checked)
         }
 
         // ---- 项 4: 应用自动更新 ----
@@ -432,11 +432,11 @@ class SettingsSheetView @JvmOverloads constructor(
         autoUpdate: Boolean,
         kernel: Boolean = false,
         kernelNoteText: String? = null,
-        noImage: Boolean = false
+        hwRender: Boolean = true
     ) {
         toggleInvert.checked = invert
         toggleAutoUpdate.checked = autoUpdate
-        toggleNoImage.checked = noImage
+        toggleHwRender.checked = hwRender
         kernelX5 = kernel
         updateKernelValue()
         if (!kernelNoteText.isNullOrBlank()) {
