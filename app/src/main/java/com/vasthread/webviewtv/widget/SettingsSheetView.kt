@@ -25,7 +25,7 @@ import com.vasthread.webviewtv.misc.UiScale
  * 目前三部分设置:
  *   1. 上下按键切换: 开关。开启=反转(手机上滑/电视按下键 改为切上一个台)
  *   2. 播放内核: 点击弹窗选择(系统内核 / 腾讯 X5), 重启应用后生效;
- *      其下为无图模式开关(隐藏大图加速加载, 即时生效)
+ *      其下为硬件加速渲染开关(默认开; 关闭后走软件渲染, 异常设备兼容兑底)
  *   3. 应用自动更新: 开关(启动时自动检测新版本) + 手动"立即检查更新"
  *
  * 视觉与频道/清晰度面板完全一致: 影院深色面板 + 琥珀强调 + 焦点黄底黑字。
@@ -50,8 +50,8 @@ class SettingsSheetView @JvmOverloads constructor(
         fun onInvertSwitchChanged(invert: Boolean)
         /** 自动更新开关变化 */
         fun onAutoUpdateChanged(enabled: Boolean)
-        /** 无图模式开关变化(隐藏大图保留图标) */
-        fun onNoImageChanged(enabled: Boolean)
+        /** 硬件加速渲染开关变化(GPU 渲染管线, 视频解码输出走 GPU) */
+        fun onHwRenderChanged(enabled: Boolean)
         /** 点击"立即检查更新" */
         fun onCheckUpdateClick()
         /** 切换播放内核(true=X5, false=系统) */
@@ -65,21 +65,28 @@ class SettingsSheetView @JvmOverloads constructor(
 
     private val toggleInvert: ToggleView
     private val toggleAutoUpdate: ToggleView
-    private val toggleNoImage: ToggleView
+    private val toggleHwRender: ToggleView
     private val kernelValue: TextView
     private val kernelNote: TextView
     private val kernelOverlay: FrameLayout
     private lateinit var kernelRowRef: TextView
     private val kernelOptions = mutableListOf<LinearLayout>()
     private var kernelX5 = false
+    /** 主面板容器(电视焦点定位起点) */
+    private lateinit var panelRef: FrameLayout
+    /** 电视十字键导航链: 设置面板内容行(按可见性重连) */
+    private val tvRows = mutableListOf<View>()
 
     init {
         isClickable = true
         isFocusable = false
 
-        // 半透明遮罩, 点击关闭
+        // 半透明遮罩, 点击关闭。
+        // 电视: 可聚焦 —— 行内左右/上下误逸出面板时焦点落在遮罩(OK/触摸=关闭),
+        // 不会钻进遮罩下面的 WebView 导致按键失去反应
         val dim = View(context)
         dim.setBackgroundColor(COLOR_DIM)
+        dim.isFocusable = true
         dim.setOnClickListener { dismiss() }
         addView(dim, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
@@ -89,11 +96,16 @@ class SettingsSheetView @JvmOverloads constructor(
         val panel = FrameLayout(context).apply {
             background = rounded(COLOR_PANEL, ui.dp(10f) * 1.8f)
         }
+        panelRef = panel
         addView(panel, LayoutParams(panelW, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         val scroll = ScrollView(context).apply {
             isVerticalScrollBarEnabled = true
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
             isFillViewport = true
+            // 电视: 焦点必须落在内容行(十字键导航 + OK 触发), 不进滚动容器本身,
+            // 否则焦点被 ScrollView 授走、十字键变成滚动、OK 无响应(v2.4.6 实测 bug)
+            isFocusable = false
+            isFocusableInTouchMode = false
         }
         val content = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -133,6 +145,7 @@ class SettingsSheetView @JvmOverloads constructor(
         content.addView(rowInvert, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { bottomMargin = ui.dp(6f) })
+        tvRows.add(rowInvert)
         rowInvert.setOnClickListener {
             toggleInvert.checked = !toggleInvert.checked
             callback?.onInvertSwitchChanged(toggleInvert.checked)
@@ -149,20 +162,22 @@ class SettingsSheetView @JvmOverloads constructor(
         content.addView(rowKernel, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { bottomMargin = ui.dp(6f) })
+        tvRows.add(rowKernel)
         rowKernel.setOnClickListener { showKernelPicker() }
 
-        // ---- 项 3: 无图模式(隐藏大图加速加载, 即时生效) ----
-        val (rowNoImage, t3) = createToggleRow(
-            title = "无图模式",
-            note = "隐藏海报等大图以加快加载，小图标不受影响。默认关闭。"
+        // ---- 项 3: 硬件加速渲染(默认开; GPU 渲染管线) ----
+        val (rowHwRender, t3) = createToggleRow(
+            title = "硬件加速渲染",
+            note = "默认开启。视频解码输出走 GPU 硬件管线，流畅不发热；个别设备画面异常时再关闭改用软件渲染（CPU，较卡）。"
         )
-        toggleNoImage = t3
-        content.addView(rowNoImage, LinearLayout.LayoutParams(
+        toggleHwRender = t3
+        content.addView(rowHwRender, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { bottomMargin = ui.dp(6f) })
-        rowNoImage.setOnClickListener {
-            toggleNoImage.checked = !toggleNoImage.checked
-            callback?.onNoImageChanged(toggleNoImage.checked)
+        tvRows.add(rowHwRender)
+        rowHwRender.setOnClickListener {
+            toggleHwRender.checked = !toggleHwRender.checked
+            callback?.onHwRenderChanged(toggleHwRender.checked)
         }
 
         // ---- 项 4: 应用自动更新 ----
@@ -174,6 +189,7 @@ class SettingsSheetView @JvmOverloads constructor(
         content.addView(rowAuto, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { bottomMargin = ui.dp(2f) })
+        tvRows.add(rowAuto)
         rowAuto.setOnClickListener {
             toggleAutoUpdate.checked = !toggleAutoUpdate.checked
             callback?.onAutoUpdateChanged(toggleAutoUpdate.checked)
@@ -197,16 +213,24 @@ class SettingsSheetView @JvmOverloads constructor(
         content.addView(checkRow, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = ui.dp(6f) })
+        tvRows.add(checkRow)
 
-        // ---- TBS 内核管理(仅选 X5 时显示; 安装/清除线上内核) ----
+        // ---- TBS 内核管理(仅选 X5 时显示; 下载安装/本地导入内核) ----
         val tbsRow = TextView(context).apply {
             text = "X5 内核管理（下载 / 安装内核）›"
             setTextColor(0xFF7A8496.toInt())
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ui.sp(11f))
             gravity = Gravity.CENTER
+            isFocusable = true
+            isClickable = true
+            background = itemBackground(ui.dp(5f) * 1.6f)
             setPadding(0, ui.dp(9f), 0, 0)
             setOnClickListener {
                 context.startActivity(Intent(context, TbsManagerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+            // 焦点态: 黄底黑字(与其他行一致, 否则电视上看不出焦点在哪)
+            setOnFocusChangeListener { v, hasFocus ->
+                (v as TextView).setTextColor(if (hasFocus) COLOR_FOCUS_TEXT else 0xFF7A8496.toInt())
             }
         }
         content.addView(tbsRow, LinearLayout.LayoutParams(
@@ -214,6 +238,7 @@ class SettingsSheetView @JvmOverloads constructor(
         ))
         tbsRow.visibility = GONE
         kernelRowRef = tbsRow
+        tvRows.add(tbsRow)
         // ---- 内核选择弹窗(覆盖层, 默认隐藏) ----
         kernelOverlay = FrameLayout(context).apply {
             visibility = GONE
@@ -222,6 +247,7 @@ class SettingsSheetView @JvmOverloads constructor(
         addView(kernelOverlay, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         kernelOverlay.addView(View(context).apply {
             setBackgroundColor(COLOR_DIM)
+            isFocusable = true
             setOnClickListener { closeKernelPicker() }
         }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         val pickerPanel = LinearLayout(context).apply {
@@ -254,6 +280,13 @@ class SettingsSheetView @JvmOverloads constructor(
         pickerPanel.addView(optX5, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ))
+
+        // 电视: 内核选择弹窗两个选项间上下循环导航(焦点不逸出弹窗)
+        kernelOptions.forEach { if (it.id == View.NO_ID) it.id = View.generateViewId() }
+        kernelOptions[0].nextFocusUpId = kernelOptions[1].id
+        kernelOptions[0].nextFocusDownId = kernelOptions[1].id
+        kernelOptions[1].nextFocusUpId = kernelOptions[0].id
+        kernelOptions[1].nextFocusDownId = kernelOptions[0].id
     }
 
     /** 构建"标题 + 右侧当前值"的可聚焦设置行; 焦点态文字变黑 */
@@ -399,11 +432,11 @@ class SettingsSheetView @JvmOverloads constructor(
         autoUpdate: Boolean,
         kernel: Boolean = false,
         kernelNoteText: String? = null,
-        noImage: Boolean = false
+        hwRender: Boolean = true
     ) {
         toggleInvert.checked = invert
         toggleAutoUpdate.checked = autoUpdate
-        toggleNoImage.checked = noImage
+        toggleHwRender.checked = hwRender
         kernelX5 = kernel
         updateKernelValue()
         if (!kernelNoteText.isNullOrBlank()) {
@@ -414,7 +447,8 @@ class SettingsSheetView @JvmOverloads constructor(
         kernelOverlay.visibility = GONE
         visibility = VISIBLE
         if (ui.isTv) {
-            post { findFocusable(this)?.requestFocus() }
+            rewireTvFocus()
+            post { findFocusable(panelRef)?.requestFocus() }
         }
     }
 
@@ -443,7 +477,7 @@ class SettingsSheetView @JvmOverloads constructor(
     private fun closeKernelPicker() {
         kernelOverlay.visibility = GONE
         if (ui.isTv) {
-            post { findFocusable(this)?.requestFocus() }
+            post { findFocusable(panelRef)?.requestFocus() }
         }
     }
 
@@ -454,10 +488,31 @@ class SettingsSheetView @JvmOverloads constructor(
         callback?.onKernelChanged(x5)
     }
 
+    /**
+     * 电视十字键适配(v2.4.7): 设置面板内容行上下循环导航。
+     * 面板外只有可聚焦的半透明遮罩(落在上面=OK 关闭面板), 焦点不会
+     * 逸出到面板下方铺满全屏的 WebView(否则遥控按键失去反应)。
+     * X5 内核管理入口的可见性随内核选择变化, 每次打开时按当前可见行重连。
+     */
+    private fun rewireTvFocus() {
+        val rows = tvRows.filter { it.visibility == View.VISIBLE }
+        rows.forEach { if (it.id == View.NO_ID) it.id = View.generateViewId() }
+        for (i in rows.indices) {
+            rows[i].nextFocusUpId = rows[(i - 1 + rows.size) % rows.size].id
+            rows[i].nextFocusDownId = rows[(i + 1) % rows.size].id
+        }
+    }
+
+    /**
+     * 查找首个可聚焦的内容行。
+     * 从主面板容器出发(不经半透明遮罩); ScrollView 等可滚动容器
+     * 一律跳过自身继续向内找 —— 焦点必须落在内容行上, 否则电视上
+     * 十字键变成滚动、OK 键无响应(v2.4.6 实测 bug)。
+     */
     private fun findFocusable(parent: View): View? {
         if (parent.visibility != View.VISIBLE) return null
-        if (parent.isFocusable) return parent
         if (parent is android.view.ViewGroup) {
+            if (parent !is ScrollView && parent.isFocusable) return parent
             for (i in 0 until parent.childCount) {
                 findFocusable(parent.getChildAt(i))?.let { return it }
             }
@@ -491,9 +546,11 @@ class SettingsSheetView @JvmOverloads constructor(
     }
 
     /**
-     * 自绘小型开关: 圆角胶囊轨道 + 圆点。
-     * 开启=琥珀轨道, 圆点在右; 关闭=深灰轨道, 圆点在左。
-     * 不聚焦自身(由整行聚焦), 黄底上轨道颜色仍清晰。
+     * 自绘小型开关(v2.4.9 重绘): 深色底盘 + 胶囊轨道 + 反色圆点。
+     * 黄色聚焦行上旧配色(琥珀轨道+白点)与行背景融为一体, 开/关难辨;
+     * 现在先铺一层深色底盘, 开关形状在任何背景上都清晰:
+     *   开启: 琥珀轨道 + 深黑圆点(右)   关闭: 深灰蓝轨道 + 白圆点(左)
+     * 不聚焦自身(由整行聚焦)。
      */
     @SuppressLint("ViewConstructor")
     private class ToggleView(context: Context) : View(context) {
@@ -508,9 +565,12 @@ class SettingsSheetView @JvmOverloads constructor(
 
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val trackRect = RectF()
-        private val trackOff = 0xFF37404E.toInt()
+        private val plateColor = 0xD9101318.toInt()   // 深色底盘(黄底上也清晰)
+        private val trackOff = 0xFF2A3442.toInt()
         private val trackOn = 0xFFF2B33D.toInt()
-        private val thumbColor = 0xFFF5F7FA.toInt()
+        private val thumbOn = 0xFF14161A.toInt()      // 开: 深色圆点(与琥珀轨道强对比)
+        private val thumbOff = 0xFFF5F7FA.toInt()     // 关: 白色圆点
+        private val strokeOff = 0x66F2B33D.toInt()    // 关: 琥珀细描边(提示可开启)
 
         init {
             isFocusable = false
@@ -521,14 +581,30 @@ class SettingsSheetView @JvmOverloads constructor(
             val w = width.toFloat()
             val h = height.toFloat()
             if (w <= 0f || h <= 0f) return
+            // 深色底盘: 占满整个 View, 轨道内缩 —— 任何背景(含黄色聚焦行)上都清晰
             val r = h / 2f
-            trackRect.set(0f, 0f, w, h)
+            paint.color = plateColor
+            canvas.drawRoundRect(0f, 0f, w, h, r, r, paint)
+
+            val pad = h * 0.14f
+            val trackH = h - pad * 2f
+            val tr = trackH / 2f
+            trackRect.set(pad, pad, w - pad, h - pad)
             paint.color = if (checked) trackOn else trackOff
-            canvas.drawRoundRect(trackRect, r, r, paint)
-            val margin = h * 0.16f
-            val cx = if (checked) w - r else r
-            paint.color = thumbColor
-            canvas.drawCircle(cx, r, r - margin, paint)
+            canvas.drawRoundRect(trackRect, tr, tr, paint)
+            // 关闭态: 琥珀细描边, 暗示可开启
+            if (!checked) {
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = Math.max(1f, trackH * 0.07f)
+                paint.color = strokeOff
+                canvas.drawRoundRect(trackRect, tr, tr, paint)
+                paint.style = Paint.Style.FILL
+            }
+            // 滑块: 贴轨道端部, 开=深色(琥珀轨道上强对比), 关=白色
+            val thumbR = tr - trackH * 0.16f
+            val cx = if (checked) w - pad - tr else pad + tr
+            paint.color = if (checked) thumbOn else thumbOff
+            canvas.drawCircle(cx, h / 2f, thumbR, paint)
         }
     }
 }

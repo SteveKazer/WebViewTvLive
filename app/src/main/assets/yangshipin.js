@@ -48,11 +48,6 @@
 //   版权态下清晰度操作被忽略(页面不会响应, 避免卡"正在切换中"),
 //   也不再弹原生底部文字提示。
 //
-// 无图模式(v2.4.6):
-//   setNoImage(true): 隐藏海报/封面等大图并给图片加 lazy 加载,
-//   减少解码渲染与首屏流量; 小图标与页面自身加载动画不受影响。
-//   默认关闭, 由原生在脚本就绪/设置开关变化时下发。
-//
 // 卡顿提示(v2.4.6):
 //   播放中持续缓冲(readyState<3)超过 4 秒且距上次提示 >60 秒时,
 //   notifyStutter() 原生底部提示用户尝试更换清晰度。
@@ -120,9 +115,7 @@
 		'.y-full-control, .y-control-outside, .volume-muted-tip-container { display:none !important; }',
 		'[class^="winG-mask"], [class^="winY-"], [class^="winA-mask"] { display:none !important; }',
 		// video.js 大播放按钮: X5 下换清晰度/换台瞬间视频进入 paused 态会渲染巨大播放图标, 隐藏之
-		'.vjs-big-play-button { display:none !important; }',
-		// 无图模式: 被标记的大图隐藏(见 applyNoImage), 小图标不受影响
-		'.wvt-noimg { display:none !important; }'
+		'.vjs-big-play-button { display:none !important; }'
 	].join('\n');
 
 	function injectImmersiveCss() {
@@ -277,13 +270,6 @@
 				else { log('restore timeout, keep default channel'); }
 			}
 			tryRestore();
-		},
-
-		// 无图模式开关(原生在脚本就绪与设置变化时调用): 隐藏大图保留小图标
-		setNoImage: function(on) {
-			noImageMode = !!on;
-			applyNoImage();
-			log('no-image mode: ' + noImageMode);
 		},
 
 		// JS 控制播放/暂停(供 App 生命周期使用)
@@ -460,47 +446,6 @@
 		setTimeout(watchCopyright, 1000);
 	}
 
-	// ---------------- 无图模式(v2.4.6): 隐藏大图加速渲染, 保留小图标 ----------------
-	// 页面自身的加载动画(.loading1/.loading)、清晰度菜单与控制条里的
-	// 图片属于功能元素, 一律不动(否则丢失加载反馈与交互图标);
-	// 其余图片按尺寸判定: 自然尺寸任一边 >=300px 或渲染区 >=200x150
-	// 即视为大图(海报/封面/横幅), 加 wvt-noimg 类隐藏; 小图标不受影响。
-	// 同时给图片设置 loading=lazy, 未进入视口的大图不再请求流量。
-	var noImageMode = false;
-	function isProtectedImage(img) {
-		try {
-			if (img.closest && img.closest('.loading1, .loading, .bei, .bei-list, .vjs-control-bar')) { return true; }
-		} catch (e) { /* ignore */ }
-		return false;
-	}
-	function applyNoImage() {
-		try {
-			var imgs = document.images || [];
-			for (var i = 0; i < imgs.length; i++) {
-				var img = imgs[i];
-				if (isProtectedImage(img)) {
-					img.classList.remove('wvt-noimg');
-					continue;
-				}
-				var w = img.naturalWidth || 0, h = img.naturalHeight || 0;
-				var r = img.getBoundingClientRect();
-				var rw = r ? r.width : 0, rh = r ? r.height : 0;
-				var big = w >= 300 || h >= 300 || (rw >= 200 && rh >= 150);
-				if (noImageMode) {
-					try { img.loading = 'lazy'; } catch (e) { /* ignore */ }
-					if (big) { img.classList.add('wvt-noimg'); }
-					else { img.classList.remove('wvt-noimg'); }
-				} else if (img.classList.contains('wvt-noimg')) {
-					img.classList.remove('wvt-noimg');
-				}
-			}
-		} catch (e) { /* ignore */ }
-	}
-	function watchNoImage() {
-		if (noImageMode) { applyNoImage(); } // 周期扫新出现的大图(页面动态渲染)
-		setTimeout(watchNoImage, 2000);
-	}
-
 	// 清晰度跟随提前点击: 页面切台会重置回蓝光; 等新台真正生效
 	// (tvSelect 变为新台, 避免旧台菜单未刷新的竞态)后比对清晰度,
 	// 不符立即点击目标; 兑底由 playing 事件路径接管
@@ -649,7 +594,7 @@
 		setTimeout(watchDetect, 5000);
 	}
 
-	log('injected, yangshipin immersive edition v2.4.6 (dual-kernel + no-image)');
+	log('injected, yangshipin immersive edition v2.4.9 (dual-kernel + hw-render)');
 	injectImmersiveCss();
 	watchImmersive();
 	watchVideo();
@@ -657,6 +602,5 @@
 	watchVideoSurface();
 	watchDetect();
 	watchCopyright();
-	watchNoImage();
 	callNative('notifyScriptReady');
 })();

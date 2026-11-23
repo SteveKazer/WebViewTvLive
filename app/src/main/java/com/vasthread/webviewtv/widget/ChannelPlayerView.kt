@@ -18,6 +18,7 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import com.vasthread.webviewtv.R
 import com.vasthread.webviewtv.misc.WebKernel
+import com.vasthread.webviewtv.misc.preference
 
 /**
  * 播放器视图: 启动遮罩 + 防误触遮罩 + 映射点击。
@@ -39,6 +40,8 @@ class ChannelPlayerView @JvmOverloads constructor(
         private const val SWIPE_DISTANCE_THRESHOLD = 60f
         private const val LOADING_SAFETY_TIMEOUT = 30000L
         private const val SWITCH_COVER_SAFETY_TIMEOUT = 15000L
+        /** 与 MainActivity.KEY_HW_RENDER 同名(硬件加速渲染偏好, WebView 创建时读取) */
+        private const val PREF_HW_RENDER = "hw_render"
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -153,6 +156,8 @@ class ChannelPlayerView @JvmOverloads constructor(
         host.addView(webViewImpl, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
         ))
+        // 硬件加速渲染: 跟随偏好应用(LAYER_TYPE_NONE=GPU 渲染 / SOFTWARE=软渲染兑底)
+        if (!preference.getBoolean(PREF_HW_RENDER, true)) { applyHwRender(false) }
         fullscreenContainer = findViewById(R.id.fullscreenContainer)
         loadingOverlay = findViewById(R.id.loadingOverlay)
         switchCover = findViewById(R.id.switchCover)
@@ -270,9 +275,17 @@ class ChannelPlayerView @JvmOverloads constructor(
     /** 版权受限态下清晰度切换被禁止(供上层拦截, 避免卡"正在切换中") */
     fun isCopyrightBlocked(): Boolean = copyrightBlocked
 
-    /** 无图模式开关下发到注入脚本(隐藏大图保留图标, 立即生效) */
-    fun applyNoImage(enabled: Boolean) {
-        webView.evaluate("window.__WVT__ && __WVT__.setNoImage(${if (enabled) "true" else "false"})", null)
+    /**
+     * 硬件加速渲染(v2.4.9): enabled=true 清除图层覆盖(跟随窗口默认 GPU 渲染);
+     * enabled=false 切软件渲染(CPU, 部分异常设备的兼容兑底, 流畅度会下降)。
+     * 视频解码本身由内核自动选硬解(MediaCodec/GPU), 需 GPU 渲染管线配合输出,
+     * 关闭后画面输出改走 CPU, 个别设备可解决花屏/黑纹等问题。即时生效。
+     */
+    fun applyHwRender(enabled: Boolean) {
+        webViewImpl.setLayerType(
+            if (enabled) View.LAYER_TYPE_NONE else View.LAYER_TYPE_SOFTWARE,
+            null
+        )
     }
 
     fun pauseVideo() = webView.pauseVideo()
