@@ -8,6 +8,7 @@ import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.util.AttributeSet
+import android.util.SparseIntArray
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -59,6 +60,8 @@ class ChannelSheetView @JvmOverloads constructor(
 
     /** 台标位图缓存(assets 解码, 已裁剪透明边) */
     private val logoCache = HashMap<String, Bitmap?>()
+    /** 分类 tab 视图 id(频道行左键返回当前分类用) */
+    private val tabIds = SparseIntArray()
 
     private val rail: LinearLayout
     private val tabAll: TextView
@@ -145,6 +148,18 @@ class ChannelSheetView @JvmOverloads constructor(
         tabAll.setOnClickListener { setTab(Channels.TAB_ALL) }
         tabCctv.setOnClickListener { setTab(Channels.TAB_CCTV) }
         tabWeishi.setOnClickListener { setTab(Channels.TAB_WEISHI) }
+        // 电视: 频道行按左键直接回到当前分类 tab(几何最近会错落到别的分类)
+        listOf(tabAll, tabCctv, tabWeishi, tabFavorite).forEach {
+            if (it.id == View.NO_ID) { it.id = View.generateViewId() }
+            tabIds.put(
+                when (it) {
+                    tabCctv -> Channels.TAB_CCTV
+                    tabWeishi -> Channels.TAB_WEISHI
+                    tabFavorite -> Channels.TAB_FAVORITE
+                    else -> Channels.TAB_ALL
+                }, it.id
+            )
+        }
 
         // ---- 右侧内容区 ----
         val content = FrameLayout(context)
@@ -505,6 +520,7 @@ class ChannelSheetView @JvmOverloads constructor(
 
         fun bind(channel: Channel) {
             channelName = channel.name
+            row.nextFocusLeftId = tabIds[currentTab, tabAll.id] // 左键回当前分类
             tvNumber.text = String.format("%03d", channel.number)
             val bmp = logoOf(channel.logoAsset)
             if (bmp != null) {

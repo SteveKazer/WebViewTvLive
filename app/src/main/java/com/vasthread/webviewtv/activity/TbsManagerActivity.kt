@@ -68,6 +68,7 @@ class TbsManagerActivity : AppCompatActivity() {
 
     private var webView: WebView? = null
     private var debugLoaded = false
+    private lateinit var btnBack: TextView
     private lateinit var statusText: TextView
     private lateinit var deviceInfo: TextView
     private lateinit var btnDownload: TextView
@@ -140,6 +141,22 @@ class TbsManagerActivity : AppCompatActivity() {
 
         refreshStatus()
         refreshDeviceInfo()
+        rewireTvFocus()
+    }
+
+    /** 电视十字键适配(v2.4.7): 返回/下载/本地/调试按钮间上下循环导航, 焦点不逸出页面 */
+    private fun rewireTvFocus() {
+        val chain = listOfNotNull(
+            btnBack,
+            btnDownload.takeIf { it.visibility == View.VISIBLE },
+            btnLocal.takeIf { it.visibility == View.VISIBLE },
+            btnDebug
+        )
+        chain.forEach { if (it.id == View.NO_ID) it.id = View.generateViewId() }
+        for (i in chain.indices) {
+            chain[i].nextFocusUpId = chain[(i - 1 + chain.size) % chain.size].id
+            chain[i].nextFocusDownId = chain[(i + 1) % chain.size].id
+        }
     }
 
     // ---------------- 界面构建 ----------------
@@ -150,15 +167,21 @@ class TbsManagerActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(6f), 0, dp(14f), 0)
             background = GradientDrawable().apply { setColor(0xFF13161B.toInt()) }
-            addView(TextView(this@TbsManagerActivity).apply {
+            // 返回按钮(电视可聚焦, 焦点态变琥珀色)
+            btnBack = TextView(this@TbsManagerActivity).apply {
                 text = "‹"
                 setTextColor(TEXT)
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
                 gravity = Gravity.CENTER
                 setPadding(dp(10f), 0, dp(10f), dp(2f))
+                isFocusable = true
                 isClickable = true
+                setOnFocusChangeListener { v, hasFocus ->
+                    (v as TextView).setTextColor(if (hasFocus) ACCENT else TEXT)
+                }
                 setOnClickListener { onBackRequested() }
-            })
+            }
+            addView(btnBack)
             addView(TextView(this@TbsManagerActivity).apply {
                 text = "X5 内核管理"
                 setTextColor(TEXT)
@@ -315,6 +338,14 @@ class TbsManagerActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         handler.post(statusAction)
+        // 电视遥控适配(v2.4.9): 页面打开后无任何焦点时, 十字键没有起点,
+        // 导航/OK 全部无响应("点不了、不能下载"的根因)。无焦点时主动
+        // 聚焦首个可用按钮(下载为主操作, x86 设备退而聚焦返回)
+        if (currentFocus == null) {
+            val target = btnDownload.takeIf { it.visibility == View.VISIBLE && it.isEnabled }
+                ?: btnBack
+            target.requestFocus()
+        }
     }
 
     override fun onPause() {
