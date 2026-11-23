@@ -223,9 +223,14 @@ class SettingsSheetView @JvmOverloads constructor(
             gravity = Gravity.CENTER
             isFocusable = true
             isClickable = true
+            background = itemBackground(ui.dp(5f) * 1.6f)
             setPadding(0, ui.dp(9f), 0, 0)
             setOnClickListener {
                 context.startActivity(Intent(context, TbsManagerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+            // 焦点态: 黄底黑字(与其他行一致, 否则电视上看不出焦点在哪)
+            setOnFocusChangeListener { v, hasFocus ->
+                (v as TextView).setTextColor(if (hasFocus) COLOR_FOCUS_TEXT else 0xFF7A8496.toInt())
             }
         }
         content.addView(tbsRow, LinearLayout.LayoutParams(
@@ -541,9 +546,11 @@ class SettingsSheetView @JvmOverloads constructor(
     }
 
     /**
-     * 自绘小型开关: 圆角胶囊轨道 + 圆点。
-     * 开启=琥珀轨道, 圆点在右; 关闭=深灰轨道, 圆点在左。
-     * 不聚焦自身(由整行聚焦), 黄底上轨道颜色仍清晰。
+     * 自绘小型开关(v2.4.9 重绘): 深色底盘 + 胶囊轨道 + 反色圆点。
+     * 黄色聚焦行上旧配色(琥珀轨道+白点)与行背景融为一体, 开/关难辨;
+     * 现在先铺一层深色底盘, 开关形状在任何背景上都清晰:
+     *   开启: 琥珀轨道 + 深黑圆点(右)   关闭: 深灰蓝轨道 + 白圆点(左)
+     * 不聚焦自身(由整行聚焦)。
      */
     @SuppressLint("ViewConstructor")
     private class ToggleView(context: Context) : View(context) {
@@ -558,9 +565,12 @@ class SettingsSheetView @JvmOverloads constructor(
 
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val trackRect = RectF()
-        private val trackOff = 0xFF37404E.toInt()
+        private val plateColor = 0xD9101318.toInt()   // 深色底盘(黄底上也清晰)
+        private val trackOff = 0xFF2A3442.toInt()
         private val trackOn = 0xFFF2B33D.toInt()
-        private val thumbColor = 0xFFF5F7FA.toInt()
+        private val thumbOn = 0xFF14161A.toInt()      // 开: 深色圆点(与琥珀轨道强对比)
+        private val thumbOff = 0xFFF5F7FA.toInt()     // 关: 白色圆点
+        private val strokeOff = 0x66F2B33D.toInt()    // 关: 琥珀细描边(提示可开启)
 
         init {
             isFocusable = false
@@ -571,14 +581,30 @@ class SettingsSheetView @JvmOverloads constructor(
             val w = width.toFloat()
             val h = height.toFloat()
             if (w <= 0f || h <= 0f) return
+            // 深色底盘: 占满整个 View, 轨道内缩 —— 任何背景(含黄色聚焦行)上都清晰
             val r = h / 2f
-            trackRect.set(0f, 0f, w, h)
+            paint.color = plateColor
+            canvas.drawRoundRect(0f, 0f, w, h, r, r, paint)
+
+            val pad = h * 0.14f
+            val trackH = h - pad * 2f
+            val tr = trackH / 2f
+            trackRect.set(pad, pad, w - pad, h - pad)
             paint.color = if (checked) trackOn else trackOff
-            canvas.drawRoundRect(trackRect, r, r, paint)
-            val margin = h * 0.16f
-            val cx = if (checked) w - r else r
-            paint.color = thumbColor
-            canvas.drawCircle(cx, r, r - margin, paint)
+            canvas.drawRoundRect(trackRect, tr, tr, paint)
+            // 关闭态: 琥珀细描边, 暗示可开启
+            if (!checked) {
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = Math.max(1f, trackH * 0.07f)
+                paint.color = strokeOff
+                canvas.drawRoundRect(trackRect, tr, tr, paint)
+                paint.style = Paint.Style.FILL
+            }
+            // 滑块: 贴轨道端部, 开=深色(琥珀轨道上强对比), 关=白色
+            val thumbR = tr - trackH * 0.16f
+            val cx = if (checked) w - pad - tr else pad + tr
+            paint.color = if (checked) thumbOn else thumbOff
+            canvas.drawCircle(cx, h / 2f, thumbR, paint)
         }
     }
 }

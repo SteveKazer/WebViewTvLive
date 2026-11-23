@@ -21,10 +21,24 @@
 //   视频真正恢复播放(rs>=3 且未暂停)后 notifyPlaybackResumed() 揭幕。
 //   切清晰度黑幕期间 seek 回切换前位置(避免页面从 ct=0 重播已看内容)。
 //
-// 切流期间静音(v2.4.5):
+// 切流期间静音(v2.4.5, v2.4.9 强化):
 //   切流瞬间立即 v.muted=true —— 旧台声音立刻消失(此前旧画面隐藏但
 //   声音还在), 画面确认后才解除静音, 声音与画面同时出现(此前先有声后
 //   有画)。watchImmersive 的自动解除静音在切流期间被抑制。
+//   v2.4.9: 页面自动播放逻辑可能在切流中自行解除静音, 轮询每 250ms
+//   强制压回(静音锁), 直到首帧确认才放行。
+//
+// 首帧确认揭幕(v2.4.9):
+//   playing 事件只代表解码器开始出数据, 不代表首帧已渲染到屏幕。
+//   旧逻辑在 playing/canplay 就恢复视频可见, 新设备(如小米 G27 Pro)
+//   上解码器暖机慢, 导致“先声音后画面/亮屏闪黑”。现在用
+//   requestVideoFrameCallback 等真实首帧(不支持时轮询兑底), 确认后
+//   才恢复视频可见 + 解除静音 + 通知原生揭幕 —— 声画严格同步。
+//
+// 频道漂移纠正(v2.4.9):
+//   页面异常(流错误/自刷新)可能自行跳回默认台(如 CCTV1)。沉浸式下
+//   用户无法直接操作页面, 漂移必为页面异常: 连续两次确认后自动点回
+//   最后指令频道(带冷却, 防与页面打架; 版权态/切流中跳过)。
 //
 // 换台清晰度跟随(实测: 页面切台会重置回蓝光):
 //   720P/540P 用户切台时页面会先加载蓝光流(电视上慢且易死锁),
@@ -206,6 +220,7 @@
 			retryCount = 0;
 			beginStreamSwitch();          // 动作瞬间: 静音+隐藏视频 + 原生黑幕
 			pill.click();
+			lastCommandedChannel = name;  // 频道漂移纠正的基准(页面自行跳台时点回)
 			stallSince = Date.now(); // 换台后重置卡住计时
 			// 清晰度跟随提前点击: 新台加载早期即点击目标清晰度,
 			// 不等蓝光流完整起播, 省一次完整加载(小内存电视更轻快)
@@ -339,7 +354,6 @@
 			// 新流元数据就绪即恢复位置(早于首帧渲染)
 			v.addEventListener('loadedmetadata', function() { if (pendingSeek > 0) { finishPendingSeek(v); } });
 			v.addEventListener('playing', function() {
-				setVideoSurface(v, false);
 				// 换台清晰度跟随兑底: 起播时若仍与目标不符则切回
 				// (提前点击路径失败时接管; noSeek: 新台不继承旧台位置)
 				if (pendingFollowQuality) {
@@ -353,17 +367,51 @@
 					pendingFollowQuality = '';
 				}
 				finishPendingSeek(v); // 恢复到切换前位置(避开页面从 ct=0 重播)
-				// 画面确认后解除静音并通知原生揭幕 —— 声音与画面同时出现
-				setTimeout(function() {
-					if (!v.paused && v.readyState >= 3 && v.videoWidth > 0) {
-						try {
-							if (v.muted && switchMuted) { v.muted = false; switchMuted = false; }
-						} catch (e) { /* ignore */ }
-						notifyPlaybackResumed();
-					}
-				}, 250);
+				// v2.4.9: 不再立即恢复视频可见 —— playing 不代表首帧已渲染;
+				// 首帧确认后才统一恢复可见 + 解除静音 + 揭幕(声画同步)
+				confirmResume(v);
 			});
-			v.addEventListener('canplay', function() { if (!v.paused) { setVideoSurface(v, false); } });
+			v.addEventListener('canplay', function() {
+				// 非切流态的缓冲恢复立即显示; 切流态由 confirmResume 统一揭幕,
+				// 否则视频层提前露出旧帧/黑帧造成亮屏闪黑
+				if (!v.paused && !switchMuted && !pendingFollowQuality) { setVideoSurface(v, false); }
+			});
+		} catch (e) { /* ignore */ }
+	}
+
+	// 首帧确认(v2.4.9): requestVideoFrameCallback 在真实帧呈现时回调,
+	// 不支持时 250ms 轮询兑底; 900ms 超时兑底防 rVFC 不触发
+	function confirmResume(v) {
+		var done = false;
+		function once() {
+			if (done) { return; }
+			done = true;
+			setTimeout(function() { finishResume(v, false); }, 60); // 再缓冲一帧画面更稳
+		}
+		var fallback = setTimeout(once, 900);
+		try {
+			if (typeof v.requestVideoFrameCallback === 'function') {
+				v.requestVideoFrameCallback(function() {
+					clearTimeout(fallback);
+					once();
+				});
+				return;
+			}
+		} catch (e) { /* ignore */ }
+		clearTimeout(fallback);
+		setTimeout(once, 250);
+	}
+	function finishResume(v, retried) {
+		try {
+			if (!v || v.paused || v.readyState < 3 || v.videoWidth === 0) {
+				// 状态失效(切清晰度重入等): 允许一次重试, 再失败等下次 playing
+				if (!retried) { setTimeout(function() { finishResume(v, true); }, 500); }
+				return;
+			}
+			setVideoSurface(v, false);
+			if (v.muted && switchMuted) { v.muted = false; switchMuted = false; }
+			notifyPlaybackResumed();
+			log('playback resume confirmed (first frame)');
 		} catch (e) { /* ignore */ }
 	}
 	function watchVideoSurface() {
@@ -371,8 +419,15 @@
 			var v = q('video');
 			if (v) {
 				bindVideoEvents(v);
+				// 静音锁(v2.4.9): 页面自动播放逻辑可能自行解除静音,
+				// 每 250ms 强制压回, 直到首帧确认(finishResume)才放行
+				if (switchMuted && !v.muted) { try { v.muted = true; } catch (e) { /* ignore */ } }
 				var hide = v.paused && !v.ended;
-				if (!hide && v.readyState <= 1) {
+				if (switchMuted || pendingFollowQuality) {
+					// 切流全程保持视频层隐藏(由 finishResume 统一揭幕),
+					// 避免视频层提前露出旧帧/黑帧造成亮屏闪黑
+					hide = true;
+				} else if (!hide && v.readyState <= 1) {
 					// 持续无数据(切流后)超过 600ms 也隐藏
 					if (surfaceEmptySince === 0) { surfaceEmptySince = Date.now(); }
 					else if (Date.now() - surfaceEmptySince > 600) { hide = true; }
@@ -627,7 +682,48 @@
 	}
 
 	// 4. 频道检测: 页面频道集合变化时上报原生(备用卫视检测到即显示)
+	//    v2.4.9: 同时做频道漂移检测 —— 页面异常自行跳台时点回最后指令频道
 	var lastPillSig = '';
+	var lastCommandedChannel = ''; // 最后一次成功指令的频道(switchChannel 设置)
+	var driftCount = 0;
+	var lastDriftFixAt = 0;
+
+	// 频道漂移纠正: 页面流错误/自刷新可能跳回默认台(如 CCTV1)。
+	// 沉浸式下用户无法直接操作页面, 漂移必为页面异常;
+	// 连续两次(10s)确认后自动点回, 15s 冷却防与页面反复打架。
+	// 版权态/切流中/清晰度跟随中不检测(这些状态下 tvSelect 未稳定属正常)。
+	function checkChannelDrift() {
+		try {
+			if (!lastCommandedChannel || copyrightSeen || switchMuted || pendingFollowQuality || retryTarget) {
+				driftCount = 0;
+				return;
+			}
+			var sel = q('.tvSelect');
+			if (!sel) { return; }
+			var cur = norm(sel.textContent || '');
+			if (cur.indexOf(norm(lastCommandedChannel)) < 0) {
+				driftCount++;
+				log('channel drift: now=' + cur + ' want=' + lastCommandedChannel + ' #' + driftCount);
+				if (driftCount >= 2 && Date.now() - lastDriftFixAt > 15000) {
+					var pill = findPill(lastCommandedChannel);
+					if (pill) {
+						beginStreamSwitch();
+						pill.click();
+						retryTarget = lastCommandedChannel;
+						retryAt = Date.now();
+						retryCount = 0;
+						lastDriftFixAt = Date.now();
+						stallSince = Date.now();
+						log('drift fix: switch back -> ' + lastCommandedChannel);
+					}
+					driftCount = 0;
+				}
+			} else {
+				driftCount = 0;
+			}
+		} catch (e) { /* ignore */ }
+	}
+
 	function watchDetect() {
 		try {
 			var pills = qa('.tv-main-con-r-list-left > div');
@@ -646,10 +742,11 @@
 				}
 			}
 		} catch (e) { /* ignore */ }
+		checkChannelDrift();
 		setTimeout(watchDetect, 5000);
 	}
 
-	log('injected, yangshipin immersive edition v2.4.6 (dual-kernel + no-image)');
+	log('injected, yangshipin immersive edition v2.4.9 (dual-kernel + no-image)');
 	injectImmersiveCss();
 	watchImmersive();
 	watchVideo();

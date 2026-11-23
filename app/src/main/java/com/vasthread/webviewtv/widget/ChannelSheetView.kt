@@ -7,7 +7,10 @@ import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
+import android.os.Handler
+import android.os.Looper
 import android.util.AttributeSet
+import android.util.SparseIntArray
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -21,6 +24,8 @@ import androidx.recyclerview.widget.RecyclerView
 import com.vasthread.webviewtv.misc.UiScale
 import com.vasthread.webviewtv.playlist.Channels
 import com.vasthread.webviewtv.playlist.Channels.Channel
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 
 /**
  * 频道列表弹窗(左侧抽屉式, 程序化自适应布局)。
@@ -57,8 +62,12 @@ class ChannelSheetView @JvmOverloads constructor(
 
     private val ui: UiScale = UiScale(context)
 
-    /** 台标位图缓存(assets 解码, 已裁剪透明边) */
-    private val logoCache = HashMap<String, Bitmap?>()
+    /** 台标位图缓存(assets 解码, 已裁剪透明边; 后台线程解码) */
+    private val logoCache = ConcurrentHashMap<String, Bitmap?>()
+    private val logoExecutor = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    /** 分类 tab 视图 id(频道行左键返回当前分类用) */
+    private val tabIds = SparseIntArray()
 
     private val rail: LinearLayout
     private val tabAll: TextView
@@ -145,6 +154,18 @@ class ChannelSheetView @JvmOverloads constructor(
         tabAll.setOnClickListener { setTab(Channels.TAB_ALL) }
         tabCctv.setOnClickListener { setTab(Channels.TAB_CCTV) }
         tabWeishi.setOnClickListener { setTab(Channels.TAB_WEISHI) }
+        // 电视: 频道行按左键直接回到当前分类 tab(几何最近会错落到别的分类)
+        listOf(tabAll, tabCctv, tabWeishi, tabFavorite).forEach {
+            if (it.id == View.NO_ID) { it.id = View.generateViewId() }
+            tabIds.put(
+                when (it) {
+                    tabCctv -> Channels.TAB_CCTV
+                    tabWeishi -> Channels.TAB_WEISHI
+                    tabFavorite -> Channels.TAB_FAVORITE
+                    else -> Channels.TAB_ALL
+                }, it.id
+            )
+        }
 
         // ---- 右侧内容区 ----
         val content = FrameLayout(context)
@@ -163,6 +184,9 @@ class ChannelSheetView @JvmOverloads constructor(
             overScrollMode = View.OVER_SCROLL_NEVER
             clipToPadding = false
             setPadding(ui.dp(6f), 0, ui.dp(6f), ui.dp(8f))
+            // 电视性能: 固定尺寸减少整树测量; 关闭条目动画(换台刷新更轻快)
+            setHasFixedSize(true)
+            itemAnimator = null
         }
         val listLp = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         listLp.topMargin = ui.dp(28f)
@@ -299,6 +323,14 @@ class ChannelSheetView @JvmOverloads constructor(
         }
     }
 
+    /** 当前分类对应的 tab 视图(左键返回焦点目标) */
+    private fun tabViewFor(tab: Int): View = when (tab) {
+        Channels.TAB_CCTV -> tabCctv
+        Channels.TAB_WEISHI -> tabWeishi
+        Channels.TAB_FAVORITE -> tabFavorite
+        else -> tabAll
+    }
+
     private fun focusCurrent() {
         val data = adapter.items
         if (data.isEmpty()) return
@@ -312,14 +344,25 @@ class ChannelSheetView @JvmOverloads constructor(
 
     // ---------------- 台标加载 ----------------
 
-    /** 解码台标并裁剪透明边: 使各台标实际图案充满容器, 视觉尺寸统一 */
-    private fun logoOf(asset: String): Bitmap? {
-        if (logoCache.containsKey(asset)) return logoCache[asset]
-        val bmp = runCatching {
-            context.assets.open(asset).use { BitmapFactory.decodeStream(it) }
-        }.getOrNull()?.let { trimTransparent(it) }
-        logoCache[asset] = bmp
-        return bmp
+    /** 解码台标并裁剪透明边(v2.4.9 改为后台线程, 不再阻塞列表滚动)。
+     *  命中缓存同步回调; 未命中后台解码后回主线程回调。 */
+    private fun logoOf(asset: String, onReady: (Bitmap?) -> Unit) {
+        if (logoCache.containsKey(asset)) {
+            onReady(logoCache[asset])
+            return
+        }
+        logoExecutor.execute {
+            if (logoCache.containsKey(asset)) {
+                val cached = logoCache[asset]
+                mainHandler.post { onReady(cached) }
+                return@execute
+            }
+            val bmp = runCatching {
+                context.assets.open(asset).use { BitmapFactory.decodeStream(it) }
+            }.getOrNull()?.let { trimTransparent(it) }
+            logoCache[asset] = bmp
+            mainHandler.post { onReady(bmp) }
+        }
     }
 
     /** 裁剪位图四周的透明边(保留非透明内容的最小矩形) */
@@ -505,25 +548,30 @@ class ChannelSheetView @JvmOverloads constructor(
 
         fun bind(channel: Channel) {
             channelName = channel.name
+            row.nextFocusLeftId = tabIds[currentTab, tabAll.id] // 左键回当前分类
             tvNumber.text = String.format("%03d", channel.number)
-            val bmp = logoOf(channel.logoAsset)
-            if (bmp != null) {
-                // 统一白底台标位(用户要求: 所有台标统一白底)
-                ivLogo.background = rounded(0xF5FFFFFF.toInt(), ui.dp(4f) * 1.5f)
-                ivLogo.setImageBitmap(bmp)
-                ivLogo.visibility = VISIBLE
-                tvBadge.visibility = GONE
-            } else {
-                // 无图: 文字徽章兑底(央视深红/卫视深蓝)
-                val badgeColor = if (channel.category == Channels.TAB_CCTV) 0xFF8E2222.toInt() else 0xFF1F3A5F.toInt()
-                tvBadge.text = channel.badge
-                tvBadge.background = rounded(badgeColor, ui.dp(4f) * 1.5f)
-                tvBadge.setTextSize(
-                    android.util.TypedValue.COMPLEX_UNIT_PX,
-                    (if (channel.badge.length > 2) ui.sp(9f) else ui.sp(10f))
-                )
-                tvBadge.visibility = VISIBLE
-                ivLogo.visibility = GONE
+            // 台标异步解码: 先按无图态渲染, 解码完成且仍绑定同一频道时再上图标
+            val asset = channel.logoAsset
+            val boundName = channel.name
+            ivLogo.setImageDrawable(null)
+            ivLogo.visibility = GONE
+            tvBadge.visibility = GONE
+            logoOf(asset) { bmp ->
+                if (channelName != boundName) { return@logoOf } // 行已复用, 丢弃
+                if (bmp != null) {
+                    ivLogo.background = rounded(0xF5FFFFFF.toInt(), ui.dp(4f) * 1.5f)
+                    ivLogo.setImageBitmap(bmp)
+                    ivLogo.visibility = VISIBLE
+                } else {
+                    val badgeColor = if (channel.category == Channels.TAB_CCTV) 0xFF8E2222.toInt() else 0xFF1F3A5F.toInt()
+                    tvBadge.text = channel.badge
+                    tvBadge.background = rounded(badgeColor, ui.dp(4f) * 1.5f)
+                    tvBadge.setTextSize(
+                        android.util.TypedValue.COMPLEX_UNIT_PX,
+                        (if (channel.badge.length > 2) ui.sp(9f) else ui.sp(10f))
+                    )
+                    tvBadge.visibility = VISIBLE
+                }
             }
             tvName.text = channel.name
             val isCurrent = channel.name == currentChannel

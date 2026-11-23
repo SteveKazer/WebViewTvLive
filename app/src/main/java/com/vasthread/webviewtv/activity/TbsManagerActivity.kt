@@ -338,6 +338,14 @@ class TbsManagerActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         handler.post(statusAction)
+        // 电视遥控适配(v2.4.9): 页面打开后无任何焦点时, 十字键没有起点,
+        // 导航/OK 全部无响应("点不了、不能下载"的根因)。无焦点时主动
+        // 聚焦首个可用按钮(下载为主操作, x86 设备退而聚焦返回)
+        if (currentFocus == null) {
+            val target = btnDownload.takeIf { it.visibility == View.VISIBLE && it.isEnabled }
+                ?: btnBack
+            target.requestFocus()
+        }
     }
 
     override fun onPause() {
