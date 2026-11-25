@@ -72,6 +72,7 @@ class MainActivity : AppCompatActivity() {
 	private var autoUpdate = true
 	private var hwRender = true
 	private var scriptToastShown = false
+	private var restoreStarted = false
 	private var lastBackAt = 0L
 
 	private val digitBuffer = StringBuilder()
@@ -168,6 +169,9 @@ class MainActivity : AppCompatActivity() {
 				// 内核信息合并在这里一次性告知(不在启动黑屏期单独弹 toast)
 				toast("已连接央视频 · ${kernelShortText()}")
 			}
+			// 脚本就绪后再发恢复指令(此时 window.__WVT__ 一定已建立);
+			// 仅靠页面就绪+固定延时会在慢冷启动(电视)下静默丢失指令
+			restoreIfNeeded()
 		}
 		playerView.onChannelsDetected = { json ->
 			// 页面频道检测: 更新库中频道可见性(备用卫视检测到即显示)
@@ -293,13 +297,17 @@ class MainActivity : AppCompatActivity() {
 		0
 	}
 
-	/** 页面就绪后恢复上次频道/清晰度(由注入脚本等待视频起播后执行) */
+	/** 启动恢复: 切回上次频道/清晰度。
+	 * 双触发: 脚本就绪(优先, __WVT__ 必已建立)与页面就绪(兑底);
+	 * restoreStarted 保证整生命周期只执行一次。
+	 * 慢冷启动(电视无后台留存)下脚本注入可能晚于页面就绪, 单靠页面
+	 * 就绪+固定 500ms 会在脚本尚未建立时静默丢失恢复指令——表现即
+	 * “画面停默认 CCTV1, 列表/上下台却按记忆台走”(两套状态不对应)。 */
 	private fun restoreIfNeeded() {
-		playerView.postDelayed({
-			if (lastChannel != Channels.DEFAULT_CHANNEL || lastQuality != Channels.DEFAULT_QUALITY) {
-				playerView.restore(lastChannel, qualityShort(lastQuality))
-			}
-		}, 500)
+		if (restoreStarted) return
+		if (lastChannel == Channels.DEFAULT_CHANNEL && lastQuality == Channels.DEFAULT_QUALITY) return
+		restoreStarted = true
+		playerView.restore(lastChannel, qualityShort(lastQuality))
 	}
 
 	// ---------------- 状态持久化 ----------------

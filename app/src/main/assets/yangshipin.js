@@ -255,19 +255,32 @@
 		},
 
 		// 启动恢复: 页面频道列表一旦就绪立即切换(不等默认频道起播,
-		// 省一次完整加载约 3~8 秒); 清晰度经换台跟随机制自动恢复
+		// 省一次完整加载约 3~8 秒); 清晰度经换台跟随机制自动恢复。
+		// v2.4.9 加固(修复冷启动停留 CCTV1): 等待频道列表窗口 18s -> 60s
+		// (慢冷启动下页面数据拉取可能远超 18s); 切换后校验 .tvSelect
+		// 是否真正变成目标台, 点击落空(Vue 事件未绑定/响应慢)则重试,
+		// 最多 4 次, 避免画面停在默认频道而列表/上下台按记忆台走。
 		restore: function(channel, quality) {
-			var tries = 0;
+			var tries = 0, attempts = 0;
 			function tryRestore() {
 				var pill = channel ? findPill(channel) : null;
 				if (channel && pill) {
 					setTimeout(function() { // 等 Vue 事件绑定稳定
-						window.__WVT__.switchChannel(channel, quality || '');
+						switchAndVerify();
 					}, 300);
 					return;
 				}
-				if (++tries < 45) { setTimeout(tryRestore, 400); } // 最多等待 ~18 秒
+				if (++tries < 150) { setTimeout(tryRestore, 400); } // 最多等待 ~60 秒
 				else { log('restore timeout, keep default channel'); }
+			}
+			function switchAndVerify() {
+				window.__WVT__.switchChannel(channel, quality || '');
+				setTimeout(function() {
+					var sel = q('.tvSelect');
+					if (sel && norm(sel.textContent).indexOf(norm(channel)) >= 0) { return; } // 已生效
+					if (++attempts < 4) { switchAndVerify(); } // 点击落空, 重试(已是该频道分支使其幂等)
+					else { log('restore not effective, keep default channel'); }
+				}, 4000);
 			}
 			tryRestore();
 		},
